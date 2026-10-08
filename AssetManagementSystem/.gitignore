@@ -1,0 +1,23 @@
+# Build results
+bin/
+obj/
+*.user
+
+# Visual Studio / Rider
+.vs/
+.idea/
+
+# Uploaded files (user data)
+wwwroot/uploads/
+
+# Logs
+*.log
+logs/
+
+# Environment-specific settings (keep base appsettings.json)
+appsettings.*.json
+!appsettings.json
+
+# Local secrets / user secrets
+secrets.json
+*.local.json

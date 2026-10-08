@@ -1,0 +1,29 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+*.suo
+.vs/
+
+# .NET build results
+bin/
+obj/
+
+# Node / frontend
+node_modules/
+dist/
+dist-ssr/
+.env
+.env.*
+
+# Uploaded files (user data)
+wwwroot/uploads/
+
+# Logs
+*.log
+logs/
+
+# Environment-specific settings (keep base appsettings.json)
+appsettings.*.json
+!appsettings.json
+secrets.json
+*.local.json
