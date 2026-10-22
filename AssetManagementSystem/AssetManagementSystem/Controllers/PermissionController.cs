@@ -76,22 +76,35 @@ namespace AssetManagementSystem.Controllers
 				.Distinct()
 				.ToList();
 
-			// 超级管理员角色无需配置权限（默认全权限），这里仍允许保存以便展示
-			await _db.Deleteable<SysRolePermission>()
-				.Where(p => p.RoleId == dto.roleId)
-				.ExecuteCommandAsync();
-
-			if (codes.Count > 0)
+			// 超级管理员角色无需配置权限（默认全权限），这里仍允许保存以便展示。
+			// "先删后插"包在同一事务：避免插入失败导致角色权限被清空。
+			try
 			{
-				var entities = codes.Select(code => new SysRolePermission
-				{
-					Id = Guid.NewGuid().ToString(),
-					RoleId = dto.roleId,
-					PermissionCode = code,
-					CreateTime = DateTime.Now
-				}).ToList();
+				_db.Ado.BeginTran();
 
-				await _db.Insertable(entities).ExecuteCommandAsync();
+				await _db.Deleteable<SysRolePermission>()
+					.Where(p => p.RoleId == dto.roleId)
+					.ExecuteCommandAsync();
+
+				if (codes.Count > 0)
+				{
+					var entities = codes.Select(code => new SysRolePermission
+					{
+						Id = Guid.NewGuid().ToString(),
+						RoleId = dto.roleId,
+						PermissionCode = code,
+						CreateTime = DateTime.Now
+					}).ToList();
+
+					await _db.Insertable(entities).ExecuteCommandAsync();
+				}
+
+				_db.Ado.CommitTran();
+			}
+			catch (Exception ex)
+			{
+				_db.Ado.RollbackTran();
+				return ApiResult<object>.Fail("500", $"权限分配失败：{ex.Message}");
 			}
 
 			return ApiResult<object>.Success(null, $"权限分配成功，共 {codes.Count} 项");

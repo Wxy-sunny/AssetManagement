@@ -11,6 +11,7 @@
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.29" />
     <PackageReference Include="Microsoft.Data.SqlClient" Version="7.0.2" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
+    <PackageReference Include="Serilog.AspNetCore" Version="8.0.3" />
     <PackageReference Include="SqlSugarCore" Version="5.1.4.216" />
     <PackageReference Include="StackExchange.Redis" Version="2.8.58" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="6.6.2" />
@@ -19,6 +20,11 @@
 
   <ItemGroup>
     <Folder Include="Configs\" />
+  </ItemGroup>
+
+  <!-- 允许测试项目访问内部类型（如 Top-level Statements 生成的 Program 类） -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="AssetManagementSystem.Tests" />
   </ItemGroup>
 
 </Project>

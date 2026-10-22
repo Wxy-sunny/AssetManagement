@@ -8,11 +8,35 @@ using Microsoft.IdentityModel.Tokens;
 using System.Text;
 using System.Security.Cryptography;
 using StackExchange.Redis;
+using Serilog;
 
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
+// ============ 日志：Serilog（控制台 + 文件双写） ============
+// 文件日志：logs/asset-api-YYYYMMDD.log 按天滚动，单文件 50MB 上限、最多保留 31 天。
+// 生产环境建议再接入集中式日志（ELK / Loki 等）收集同一目录。
+Log.Logger = new LoggerConfiguration()
+	.MinimumLevel.Information()
+	// 压低微软框架自身的心智负担级日志噪音
+	.MinimumLevel.Override("Microsoft", Serilog.Events.LogEventLevel.Warning)
+	.MinimumLevel.Override("Microsoft.AspNetCore", Serilog.Events.LogEventLevel.Warning)
+	.WriteTo.Console()
+	.WriteTo.File(
+		path: "logs/asset-api-.log",
+		rollingInterval: RollingInterval.Day,
+		retainedFileCountLimit: 31,
+		rollOnFileSizeLimit: true,
+		fileSizeLimitBytes: 50 * 1024 * 1024,
+		outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff} [{Level:u3}] {SourceContext}{NewLine}      {Message:lj}{NewLine}{Exception}")
+	.CreateBootstrapLogger();
+
+try
+{
+	// 用 Serilog 接管主机日志（此后 builder.Logging / ILogger 均写入 Serilog）
+	builder.Host.UseSerilog();
+
+	// Add services to the container.
 
 builder.Services.AddControllers();
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
@@ -46,6 +70,9 @@ builder.Services.AddSingleton<AssetManagementSystem.Services.ICacheService, Cach
 
 // 图形验证码服务（生成 SVG 图片并缓存答案，登录与联系请求提交时校验）
 builder.Services.AddSingleton<AssetManagementSystem.Services.ICaptchaService, CaptchaService>();
+
+// 登录防爆破守卫（账号失败锁定 + 可选 IP 限流）
+builder.Services.AddSingleton<AssetManagementSystem.Services.LoginGuardService>();
 
 // 手机验证码服务（优先 Redis，Redis 不可用时自动降级为内存）
 builder.Services.AddScoped<SmsCodeService>();
@@ -112,22 +139,31 @@ using (var scope = app.Services.CreateScope())
 	var dbServer = scope.ServiceProvider.GetRequiredService<DbServer>();
 	var configuration = scope.ServiceProvider.GetRequiredService<IConfiguration>();
 
-	// 自动建表 / 结构补齐：受 DatabaseInitialization.Enabled 控制（生产环境建议关闭）
-	var dbInit = configuration.GetSection("DatabaseInitialization");
-	if (dbInit.GetValue<bool>("Enabled"))
+	// 数据库连接串未配置时：跳过初始化与播种，避免启动即崩溃（生产环境请通过环境变量配置）
+	var assetConnection = configuration.GetConnectionString("AssetConnection");
+	if (string.IsNullOrWhiteSpace(assetConnection))
 	{
-		if (dbInit.GetValue<bool>("CreateTablesOnStartup"))
-		{
-			dbServer.CreateTablesInDb(DbNames.Asset);
-		}
-		DbSchemaPatcher.Patch(dbServer.Use(DbNames.Asset));
+		Log.Warning("ConnectionStrings:AssetConnection 未配置，已跳过数据库初始化与管理员播种。生产环境请通过环境变量 ConnectionStrings__AssetConnection 注入连接字符串。");
 	}
+	else
+	{
+		// 自动建表 / 结构补齐：受 DatabaseInitialization.Enabled 控制（生产环境建议关闭）
+		var dbInit = configuration.GetSection("DatabaseInitialization");
+		if (dbInit.GetValue<bool>("Enabled"))
+		{
+			if (dbInit.GetValue<bool>("CreateTablesOnStartup"))
+			{
+				dbServer.CreateTablesInDb(DbNames.Asset);
+			}
+			DbSchemaPatcher.Patch(dbServer.Use(DbNames.Asset));
+		}
 
-	// 初始化系统管理员账号（不存在才创建，不覆盖已有密码）
-	DataSeeder.SeedAdmin(dbServer.Use(DbNames.Asset), configuration);
+		// 初始化系统管理员账号（不存在才创建，不覆盖已有密码）
+		DataSeeder.SeedAdmin(dbServer.Use(DbNames.Asset), configuration);
 
-	// 生成演示数据（仅在 DemoData:Enabled 且相关表为空时执行）
-	DataSeeder.SeedDemoData(dbServer.Use(DbNames.Asset), configuration);
+		// 生成演示数据（仅在 DemoData:Enabled 且相关表为空时执行）
+		DataSeeder.SeedDemoData(dbServer.Use(DbNames.Asset), configuration);
+	}
 }
 
 
@@ -169,3 +205,19 @@ app.UseAuthorization();
 app.MapControllers();
 
 app.Run();
+}
+catch (Exception ex)
+{
+	// 启动/运行期致命错误：写入文件日志后抛出（便于事后排查）
+	Log.Fatal(ex, "应用发生致命错误并终止");
+	throw;
+}
+finally
+{
+	// 确保缓冲日志全部落盘
+	Log.CloseAndFlush();
+}
+
+// 显式声明为 public：供集成测试项目通过 WebApplicationFactory<Program> 引用
+//（Top-level Statements 生成的 Program 默认为 internal）
+public partial class Program { }

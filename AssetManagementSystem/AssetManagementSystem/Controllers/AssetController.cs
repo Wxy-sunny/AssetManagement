@@ -273,12 +273,28 @@ namespace AssetManagementSystem.Controllers
 			if (entity == null)
 				return ApiResult<object>.Fail("404", "资产不存在");
 
-			await RemoveFilesByAssetId(id);
+			List<string> physicalPaths;
+			try
+			{
+				// 事务内：先删附件记录，再删资产记录（任一步失败整体回滚，避免"资产还在但附件已没了"）
+				_db.Ado.BeginTran();
 
-			var count = await _db.Deleteable(entity).ExecuteCommandAsync();
-			return count > 0
-				? ApiResult<object>.Success(null, "删除成功")
-				: ApiResult<object>.Fail("500", "删除失败");
+				physicalPaths = await DeleteFileRecordsByAssetIdAsync(id);
+
+				var count = await _db.Deleteable(entity).ExecuteCommandAsync();
+				if (count <= 0) throw new InvalidOperationException("删除资产记录失败");
+
+				_db.Ado.CommitTran();
+			}
+			catch (Exception ex)
+			{
+				_db.Ado.RollbackTran();
+				return ApiResult<object>.Fail("500", $"删除失败：{ex.Message}");
+			}
+
+			// 事务提交后再清理物理文件（失败仅遗留孤儿文件，不影响数据一致性）
+			DeletePhysicalFiles(physicalPaths);
+			return ApiResult<object>.Success(null, "删除成功");
 		}
 
 		/// <summary>
@@ -291,15 +307,33 @@ namespace AssetManagementSystem.Controllers
 			if (ids == null || ids.Count == 0)
 				return ApiResult<object>.Fail("400", "请选择要删除的资产");
 
-			foreach (var id in ids)
+			List<string> physicalPaths;
+			var count = 0;
+			try
 			{
-				await RemoveFilesByAssetId(id);
+				// 事务内：删除所有附件记录 + 资产记录（整体成功或整体回滚）
+				_db.Ado.BeginTran();
+
+				physicalPaths = new List<string>();
+				foreach (var id in ids)
+				{
+					physicalPaths.AddRange(await DeleteFileRecordsByAssetIdAsync(id));
+				}
+
+				count = await _db.Deleteable<Asset>().In(a => a.Id, ids).ExecuteCommandAsync();
+				if (count <= 0) throw new InvalidOperationException("删除资产记录失败");
+
+				_db.Ado.CommitTran();
+			}
+			catch (Exception ex)
+			{
+				_db.Ado.RollbackTran();
+				return ApiResult<object>.Fail("500", $"删除失败：{ex.Message}");
 			}
 
-			var count = await _db.Deleteable<Asset>().In(a => a.Id, ids).ExecuteCommandAsync();
-			return count > 0
-				? ApiResult<object>.Success(null, $"已删除 {count} 条")
-				: ApiResult<object>.Fail("500", "删除失败");
+			// 事务提交后再清理物理文件
+			DeletePhysicalFiles(physicalPaths);
+			return ApiResult<object>.Success(null, $"已删除 {count} 条");
 		}
 
 		/// <summary>
@@ -388,19 +422,39 @@ namespace AssetManagementSystem.Controllers
 		/// <summary>
 		/// 删除某资产关联的所有附件记录及其物理文件
 		/// </summary>
-		private async Task RemoveFilesByAssetId(string assetId)
+		/// <summary>
+		/// 删除资产关联的附件数据库记录，返回待清理的物理路径列表。
+		/// 注意：只删记录，不删物理文件——物理文件由调用方在事务提交后统一清理，
+		/// 避免"事务回滚了但磁盘文件已没了"的不一致。
+		/// </summary>
+		private async Task<List<string>> DeleteFileRecordsByAssetIdAsync(string assetId)
 		{
 			var files = await _db.Queryable<AssetFile>().Where(f => f.AssetId == assetId).ToListAsync();
-			foreach (var file in files)
+			if (files.Count == 0) return new List<string>();
+
+			await _db.Deleteable<AssetFile>()
+				.In(f => f.Id, files.Select(f => f.Id).ToList())
+				.ExecuteCommandAsync();
+
+			return files
+				.Where(f => !string.IsNullOrWhiteSpace(f.PhysicalPath))
+				.Select(f => f.PhysicalPath!)
+				.ToList();
+		}
+
+		/// <summary>批量清理物理文件（单个失败不影响其他，也不影响主流程）</summary>
+		private void DeletePhysicalFiles(IEnumerable<string> physicalPaths)
+		{
+			foreach (var path in physicalPaths)
 			{
-				if (!string.IsNullOrWhiteSpace(file.PhysicalPath) && System.IO.File.Exists(file.PhysicalPath))
+				try
 				{
-					try { System.IO.File.Delete(file.PhysicalPath); } catch { /* 忽略文件删除异常 */ }
+					if (System.IO.File.Exists(path)) System.IO.File.Delete(path);
 				}
-			}
-			if (files.Count > 0)
-			{
-				await _db.Deleteable<AssetFile>().In(f => f.Id, files.Select(f => f.Id).ToList()).ExecuteCommandAsync();
+				catch
+				{
+					// 忽略单个文件删除失败（遗留孤儿文件，不影响数据库一致性）
+				}
 			}
 		}
 	}

@@ -79,7 +79,17 @@ namespace AssetManagementSystem.Controllers
 				if (file.Length > MaxFileSize)
 					return ApiResult<object>.Fail("400", $"文件 {file.FileName} 超过 20MB 上限");
 
-				var (relativePath, physicalPath, savedName) = await SaveToDisk(file, ext);
+				(string relativePath, string physicalPath, string savedName) savedFile;
+			try
+			{
+				savedFile = await SaveToDisk(file, ext);
+			}
+			catch (InvalidOperationException)
+			{
+				// SVG 清洗失败（非法 XML / 根元素不是 svg）
+				return ApiResult<object>.Fail("400", $"文件 {file.FileName} 不是有效的 SVG 图片");
+			}
+			var (relativePath, physicalPath, savedName) = savedFile;
 
 				var entity = new AssetFile
 				{
@@ -161,11 +171,13 @@ namespace AssetManagementSystem.Controllers
 				? "application/octet-stream"
 				: entity.ContentType;
 
+			Response.Headers["X-Content-Type-Options"] = "nosniff";
 			return PhysicalFile(path, contentType, entity.FileName);
 		}
 
 		/// <summary>
 		/// 在线预览（图片 / PDF 等浏览器可直接渲染的类型）
+		/// 安全：SVG 可内嵌脚本，强制以附件方式响应，避免在站点域名下内联渲染导致存储型 XSS。
 		/// </summary>
 		[HttpGet("preview/{id}")]
 		[Permission(Permissions.FileList)]
@@ -179,6 +191,15 @@ namespace AssetManagementSystem.Controllers
 			var path = entity.PhysicalPath;
 			if (string.IsNullOrWhiteSpace(path) || !System.IO.File.Exists(path))
 				return NotFound("文件已丢失");
+
+			Response.Headers["X-Content-Type-Options"] = "nosniff";
+
+			// SVG 一律作为附件下载（即使历史上传过未清洗的文件也不会被内联执行）
+			if (string.Equals(entity.FileExt, ".svg", StringComparison.OrdinalIgnoreCase))
+			{
+				var downloadName = Uri.EscapeDataString(entity.FileName ?? "file.svg");
+				Response.Headers["Content-Disposition"] = $"attachment; filename*=UTF-8''{downloadName}";
+			}
 
 			return PhysicalFile(path, entity.ContentType ?? "application/octet-stream");
 		}
@@ -197,12 +218,14 @@ namespace AssetManagementSystem.Controllers
 			if (entity == null)
 				return ApiResult<object>.Fail("404", "文件不存在");
 
-			DeletePhysicalFile(entity.PhysicalPath);
-
+			// 先删数据库记录（原子），成功后再清理物理文件：
+			// 若物理删除失败仅遗留孤儿文件，不会出现"库有记录但文件已丢失"的数据不一致
 			var count = await _db.Deleteable(entity).ExecuteCommandAsync();
-			return count > 0
-				? ApiResult<object>.Success(null, "删除成功")
-				: ApiResult<object>.Fail("500", "删除失败");
+			if (count <= 0)
+				return ApiResult<object>.Fail("500", "删除失败");
+
+			DeletePhysicalFile(entity.PhysicalPath);
+			return ApiResult<object>.Success(null, "删除成功");
 		}
 
 		/// <summary>
@@ -215,20 +238,23 @@ namespace AssetManagementSystem.Controllers
 			if (ids == null || ids.Count == 0)
 				return ApiResult<object>.Fail("400", "请选择要删除的文件");
 
+			// 先取出物理路径（只读），再删数据库记录，最后按路径清理物理文件
 			var files = await _db.Queryable<AssetFile>().In(f => f.Id, ids).ToListAsync();
+
+			var count = await _db.Deleteable<AssetFile>().In(f => f.Id, ids).ExecuteCommandAsync();
+			if (count <= 0)
+				return ApiResult<object>.Fail("500", "删除失败");
+
 			foreach (var file in files)
 			{
 				DeletePhysicalFile(file.PhysicalPath);
 			}
-
-			var count = await _db.Deleteable<AssetFile>().In(f => f.Id, ids).ExecuteCommandAsync();
-			return count > 0
-				? ApiResult<object>.Success(null, $"已删除 {count} 个文件")
-				: ApiResult<object>.Fail("500", "删除失败");
+			return ApiResult<object>.Success(null, $"已删除 {count} 个文件");
 		}
 
 		/// <summary>
-		/// 保存文件到 wwwroot/uploads/yyyy/MM/ 下，返回相对路径与物理路径
+		/// 保存文件到 wwwroot/uploads/yyyy/MM/ 下，返回相对路径与物理路径。
+		/// SVG 文件先经安全清洗（剔除脚本/事件属性/危险 URL），防止存储型 XSS。
 		/// </summary>
 		private async Task<(string relativePath, string physicalPath, string savedName)> SaveToDisk(IFormFile file, string ext)
 		{
@@ -242,9 +268,20 @@ namespace AssetManagementSystem.Controllers
 			var savedName = Guid.NewGuid().ToString("N") + ext;
 			var physicalPath = Path.Combine(dir, savedName);
 
-			await using (var stream = new FileStream(physicalPath, FileMode.Create))
+			if (ext.Equals(".svg", StringComparison.OrdinalIgnoreCase))
 			{
-				await file.CopyToAsync(stream);
+				// SVG：读取 → 清洗 → 落盘（非法文档会抛出 InvalidOperationException）
+				using var ms = new MemoryStream();
+				await file.CopyToAsync(ms);
+				var sanitized = SvgSanitizer.Sanitize(ms.ToArray());
+				await System.IO.File.WriteAllBytesAsync(physicalPath, sanitized);
+			}
+			else
+			{
+				await using (var stream = new FileStream(physicalPath, FileMode.Create))
+				{
+					await file.CopyToAsync(stream);
+				}
 			}
 
 			var relativePath = $"/uploads/{datePart}/{savedName}";

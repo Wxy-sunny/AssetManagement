@@ -169,23 +169,39 @@ namespace AssetManagementSystem.Controllers
 			entity.IsAdmin = dto.isAdmin ?? false;
 			entity.UpdateTime = DateTime.Now;
 
-			var count = await _db.Updateable(entity).ExecuteCommandAsync();
+			// 角色更新 + 用户表冗余角色名同步，包在同一事务，避免出现"角色已改名但用户表未同步"的不一致
+			var count = 0;
+			try
+			{
+				_db.Ado.BeginTran();
 
-			// 同步刷新用户表冗余的角色名称
+				count = await _db.Updateable(entity).ExecuteCommandAsync();
+				if (count > 0)
+				{
+					// 同步刷新用户表冗余的角色名称
+					await _db.Updateable<SysUser>()
+						.SetColumns(u => u.RoleName == entity.RoleName)
+						.Where(u => u.RoleId == entity.RoleId)
+						.ExecuteCommandAsync();
+				}
+
+				_db.Ado.CommitTran();
+				}
+				catch (Exception ex)
+				{
+				_db.Ado.RollbackTran();
+				return ApiResult<object>.Fail("500", $"修改失败：{ex.Message}");
+				}
+
 			if (count > 0)
 			{
-				await _db.Updateable<SysUser>()
-					.SetColumns(u => u.RoleName == entity.RoleName)
-					.Where(u => u.RoleId == entity.RoleId)
-					.ExecuteCommandAsync();
-
 				// 角色名变化会同步到用户表冗余字段，一并失效角色列表与用户分页缓存
 				await _cache.RemoveAsync(ListKey);
 				await _cache.RemoveByPrefixAsync(CacheKeys.UserPagePrefix);
 				return ApiResult<object>.Success(null, "修改成功");
 			}
 			return ApiResult<object>.Fail("500", "修改失败");
-		}
+			}
 
 		/// <summary>
 		/// 删除角色（存在用户引用时拒绝删除）
