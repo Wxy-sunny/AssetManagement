@@ -19,68 +19,88 @@ namespace AssetManagementSystem.Controllers
 	{
 		private readonly DbServer _dbServer;
 		private readonly ISqlSugarClient _db;
+		private readonly AssetManagementSystem.Services.ICacheService _cache;
 
-		public CategoryController(DbServer dbServer)
+		// 缓存键：分类树（无关键字）/ 平铺列表（无关键字）均为稳定读路径
+		private const string TreeCacheKey = "ams:category:tree";
+		private const string ListCacheKey = "ams:category:list";
+
+		public CategoryController(DbServer dbServer, AssetManagementSystem.Services.ICacheService cache)
 		{
 			_dbServer = dbServer;
+			_cache = cache;
 			_db = dbServer.Use(DbNames.Asset);  // 使用 Asset 数据库
 		}
 
 		/// <summary>
 		/// 获取分类树形结构（用于前端树形表格）
+		/// 无关键字走缓存（读多写少），有关键字按原逻辑实时搜索（不缓存）。
 		/// </summary>
 		[HttpGet("tree")]
 		[Permission(Permissions.CategoryList)]
 		public async Task<ApiResult<List<CategoryDto>>> GetTree([FromQuery] string? keyword = null)
 		{
-			var query = _db.Queryable<AssetCategory>();
-			// 无关键字时仅显示启用项（与原行为一致）；有关键字时在全部数据中搜索
-			if (string.IsNullOrWhiteSpace(keyword))
+			if (!string.IsNullOrWhiteSpace(keyword))
 			{
-				query = query.Where(c => c.IsEnabled == true);
-			}
-			else
-			{
-				query = query.Where(c =>
-					c.CategoryCode.Contains(keyword) ||
-					c.CategoryName.Contains(keyword));
+				// 搜索场景：跨全部数据，结果不稳定，直接查库不缓存
+				var search = await _db.Queryable<AssetCategory>()
+					.Where(c => c.CategoryCode.Contains(keyword) || c.CategoryName.Contains(keyword))
+					.OrderBy(c => c.CategoryCode)
+					.ToListAsync();
+				return ApiResult<List<CategoryDto>>.Success(search.Select(MapToDto).ToList(), "获取成功");
 			}
 
-			var categories = await query
-				.OrderBy(c => c.CategoryCode)
-				.ToListAsync();
-
-			// 构建树形 DTO
-			var dtoList = categories.Select(MapToDto).ToList();
-
-			var tree = TreeHelper.BuildTree(
-				dtoList,
-				d => d.id,
-				d => d.parentId,
-				(parent, children) => parent.children = children,
-				rootParentId: null  // 根节点的 ParentId 为 null 或空
-			);
+			// 稳定读路径：走缓存（内置防穿透/防雪崩/防击穿）
+			var tree = await _cache.GetOrSetAsync<List<CategoryDto>>(
+				TreeCacheKey,
+				async () =>
+				{
+					var categories = await _db.Queryable<AssetCategory>()
+						.Where(c => c.IsEnabled == true)
+						.OrderBy(c => c.CategoryCode)
+						.ToListAsync();
+					var dtoList = categories.Select(MapToDto).ToList();
+					return TreeHelper.BuildTree(
+						dtoList,
+						d => d.id,
+						d => d.parentId,
+						(parent, children) => parent.children = children,
+						rootParentId: null);
+				},
+				TimeSpan.FromMinutes(10));
 
 			return ApiResult<List<CategoryDto>>.Success(tree, "获取成功");
 		}
 
 		/// <summary>
 		/// 获取平铺列表（用于下拉选择器，可带查询条件）
+		/// 无关键字走缓存；有关键字实时查询。
 		/// </summary>
 		[HttpGet("list")]
 		[Permission(Permissions.CategoryList)]
 		public async Task<ApiResult<List<CategoryDto>>> GetList([FromQuery] string? keyword = null)
 		{
-			var query = _db.Queryable<AssetCategory>();
 			if (!string.IsNullOrWhiteSpace(keyword))
 			{
-				query = query.Where(c =>
-					c.CategoryCode.Contains(keyword) ||
-					c.CategoryName.Contains(keyword));
+				var search = await _db.Queryable<AssetCategory>()
+					.Where(c => c.CategoryCode.Contains(keyword) || c.CategoryName.Contains(keyword))
+					.OrderBy(c => c.CategoryCode)
+					.ToListAsync();
+				return ApiResult<List<CategoryDto>>.Success(search.Select(MapToDto).ToList(), "获取成功");
 			}
-			var categories = await query.OrderBy(c => c.CategoryCode).ToListAsync();
-			var dtoList = categories.Select(MapToDto).ToList();
-			return ApiResult<List<CategoryDto>>.Success(dtoList, "获取成功");
+
+			var list = await _cache.GetOrSetAsync<List<CategoryDto>>(
+				ListCacheKey,
+				async () =>
+				{
+					var categories = await _db.Queryable<AssetCategory>()
+						.OrderBy(c => c.CategoryCode)
+						.ToListAsync();
+					return categories.Select(MapToDto).ToList();
+				},
+				TimeSpan.FromMinutes(10));
+
+			return ApiResult<List<CategoryDto>>.Success(list, "获取成功");
 		}
 
 		/// <summary>
@@ -120,9 +140,13 @@ namespace AssetManagementSystem.Controllers
 				StatusDesc = "启用"
 			};
 			var count = await _db.Insertable(entity).ExecuteCommandAsync();
-			return count > 0
-				? ApiResult<object>.Success(null, "新增成功")
-				: ApiResult<object>.Fail("500", "新增失败");
+			if (count > 0)
+			{
+				await _cache.RemoveAsync(TreeCacheKey);
+				await _cache.RemoveAsync(ListCacheKey);
+				return ApiResult<object>.Success(null, "新增成功");
+			}
+			return ApiResult<object>.Fail("500", "新增失败");
 		}
 
 		/// <summary>
@@ -153,9 +177,13 @@ namespace AssetManagementSystem.Controllers
 			entity.UpdateTime = DateTime.Now;
 
 			var count = await _db.Updateable(entity).ExecuteCommandAsync();
-			return count > 0
-				? ApiResult<object>.Success(null, "修改成功")
-				: ApiResult<object>.Fail("500", "修改失败");
+			if (count > 0)
+			{
+				await _cache.RemoveAsync(TreeCacheKey);
+				await _cache.RemoveAsync(ListCacheKey);
+				return ApiResult<object>.Success(null, "修改成功");
+			}
+			return ApiResult<object>.Fail("500", "修改失败");
 		}
 
 		/// <summary>
@@ -178,9 +206,13 @@ namespace AssetManagementSystem.Controllers
 				return ApiResult<object>.Fail("400", "该分类包含子分类，不能直接删除");
 
 			var count = await _db.Deleteable(entity).ExecuteCommandAsync();
-			return count > 0
-				? ApiResult<object>.Success(null, "删除成功")
-				: ApiResult<object>.Fail("500", "删除失败");
+			if (count > 0)
+			{
+				await _cache.RemoveAsync(TreeCacheKey);
+				await _cache.RemoveAsync(ListCacheKey);
+				return ApiResult<object>.Success(null, "删除成功");
+			}
+			return ApiResult<object>.Fail("500", "删除失败");
 		}
 
 		// 私有映射方法：Entity -> Dto
