@@ -81,6 +81,12 @@ const router = createRouter({
           component: () => import('@/views/system/DepartmentList.vue'),
           meta: { title: '部门管理' },
         },
+        {
+          path: '/system/requests',
+          name: 'ContactRequests',
+          component: () => import('@/views/system/ContactRequestList.vue'),
+          meta: { title: '联系请求' },
+        },
       ],
     },
   ],

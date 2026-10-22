@@ -76,6 +76,18 @@
             <el-icon><OfficeBuilding /></el-icon>
             <template #title>部门管理</template>
           </el-menu-item>
+          <el-menu-item v-if="menuPerm.requests" index="/system/requests">
+            <el-icon><ChatLineSquare /></el-icon>
+            <template #title>
+              联系请求
+              <el-badge
+                v-if="pendingCount > 0"
+                :value="pendingCount"
+                :max="99"
+                class="menu-badge"
+              />
+            </template>
+          </el-menu-item>
         </el-sub-menu>
       </el-menu>
     </el-aside>
@@ -149,7 +161,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter, type RouteLocationNormalizedLoaded } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
@@ -167,12 +179,14 @@ import {
   EditPen,
   Lock,
   SwitchButton,
+  ChatLineSquare,
   ArrowDown,
   Fold,
   Expand,
 } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
 import { PERMISSIONS } from '@/types'
+import { getRequestPendingCount } from '@/api/request'
 
 const route = useRoute()
 const router = useRouter()
@@ -199,10 +213,13 @@ const addTag = (r: RouteLocationNormalizedLoaded) => {
   }
 }
 
-// 路由变化时自动追加页签
+// 路由变化时自动追加页签，进入联系请求页时刷新待处理角标
 watch(
   () => route.path,
-  () => addTag(route),
+  (p) => {
+    addTag(route)
+    if (p === '/system/requests') loadPendingCount()
+  },
   { immediate: true },
 )
 
@@ -234,7 +251,21 @@ const menuPerm = computed(() => ({
   roles: userStore.hasPermission(PERMISSIONS.RoleList),
   depts: userStore.hasPermission(PERMISSIONS.DeptList),
   notifications: userStore.hasPermission(PERMISSIONS.NotificationList),
+  requests: userStore.hasPermission(PERMISSIONS.RequestList),
 }))
+
+// 联系请求待处理数量（菜单角标）
+const pendingCount = ref(0)
+const loadPendingCount = async () => {
+  if (!userStore.hasPermission(PERMISSIONS.RequestList)) return
+  try {
+    pendingCount.value = await getRequestPendingCount()
+  } catch {
+    pendingCount.value = 0
+  }
+}
+
+onMounted(loadPendingCount)
 
 // 处理下拉菜单命令
 const handleCommand = (command: string) => {
@@ -351,6 +382,9 @@ const handleCommand = (command: string) => {
 .tag-active {
   border-color: #409eff;
   color: #409eff;
+}
+.menu-badge {
+  margin-left: 6px;
 }
 .main {
   background: #f0f2f5;

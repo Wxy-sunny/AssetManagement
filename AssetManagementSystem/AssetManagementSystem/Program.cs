@@ -44,6 +44,9 @@ builder.Services.AddSingleton<IConnectionMultiplexer>(_ =>
 // 通用缓存服务（Redis 优先 + 内存降级，内置防穿透/防雪崩/防击穿）
 builder.Services.AddSingleton<AssetManagementSystem.Services.ICacheService, CacheService>();
 
+// 图形验证码服务（生成 SVG 图片并缓存答案，登录与联系请求提交时校验）
+builder.Services.AddSingleton<AssetManagementSystem.Services.ICaptchaService, CaptchaService>();
+
 // 手机验证码服务（优先 Redis，Redis 不可用时自动降级为内存）
 builder.Services.AddScoped<SmsCodeService>();
 

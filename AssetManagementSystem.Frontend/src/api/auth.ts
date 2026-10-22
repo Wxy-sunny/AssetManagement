@@ -14,9 +14,25 @@ export interface RegisterPayload {
   email?: string
 }
 
-// 账号密码登录
-export function login(username: string, password: string): Promise<LoginResult> {
-  return request.post('/auth/login', { username, password }).then((res: any) => res?.data)
+// 账号密码登录（需图形验证码）
+export function login(
+  username: string,
+  password: string,
+  captcha?: string,
+  captchaId?: string,
+): Promise<LoginResult> {
+  return request
+    .post('/auth/login', { username, password, captcha, captchaId })
+    .then((res: any) => res?.data)
+}
+
+// 获取图形验证码（返回 captchaId、imageBase64(data URI)、expireSeconds）
+export function getCaptcha(): Promise<{
+  captchaId: string
+  imageBase64: string
+  expireSeconds: number
+}> {
+  return request.get('/auth/captcha').then((res: any) => res?.data)
 }
 
 // 注册账号（注册时绑定手机号）

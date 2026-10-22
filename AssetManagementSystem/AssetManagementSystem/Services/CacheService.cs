@@ -34,6 +34,12 @@ namespace AssetManagementSystem.Services
 		/// 按前缀批量删除缓存（如某实体的所有分页缓存键）
 		/// </summary>
 		Task RemoveByPrefixAsync(string prefix);
+
+		/// <summary>直接写入缓存（不回源），用于验证码等简单键值</summary>
+		Task SetAsync<T>(string key, T value, TimeSpan ttl);
+
+		/// <summary>直接读取缓存，未命中返回 default</summary>
+		Task<T?> GetAsync<T>(string key);
 	}
 
 	public class CacheService : ICacheService
@@ -127,6 +133,18 @@ namespace AssetManagementSystem.Services
 			_memory.Remove(key);
 			lock (_memLock) _memoryKeys.Remove(key);
 			return Task.CompletedTask;
+		}
+
+		public Task SetAsync<T>(string key, T value, TimeSpan ttl)
+		{
+			return SetRawAsync(key, JsonSerializer.Serialize(value), ttl);
+		}
+
+		public async Task<T?> GetAsync<T>(string key)
+		{
+			var raw = await GetRawAsync(key);
+			if (raw == null || raw == NullSentinel) return default;
+			return JsonSerializer.Deserialize<T>(raw);
 		}
 
 		public async Task RemoveByPrefixAsync(string prefix)

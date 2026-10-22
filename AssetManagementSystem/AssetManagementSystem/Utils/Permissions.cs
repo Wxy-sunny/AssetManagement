@@ -37,6 +37,10 @@ namespace AssetManagementSystem.Utils
 		public const string NotificationList = "notification:list";
 		public const string NotificationManage = "notification:manage";
 
+		// ========== 联系请求 ==========
+		public const string RequestList = "request:list";
+		public const string RequestManage = "request:manage";
+
 		/// <summary>
 		/// 全部权限编码（超级管理员默认拥有）
 		/// </summary>
@@ -49,7 +53,8 @@ namespace AssetManagementSystem.Utils
 			UserList, UserManage,
 			RoleList, RoleManage,
 			DeptList, DeptManage,
-			NotificationList, NotificationManage
+			NotificationList, NotificationManage,
+			RequestList, RequestManage
 		};
 
 		/// <summary>
@@ -115,6 +120,16 @@ namespace AssetManagementSystem.Utils
 					{
 						New(NotificationList, "查看通知管理", "查看全部通知（含未发布草稿）"),
 						New(NotificationManage, "管理通知", "新增、编辑、发布、撤回、删除通知")
+					}
+				},
+				new PermissionGroupDto
+				{
+					code = "request",
+					name = "联系请求",
+					permissions = new List<PermissionItemDto>
+					{
+						New(RequestList, "查看联系请求", "查看用户提交的联系/重置密码申请"),
+						New(RequestManage, "处理联系请求", "标记请求为已处理并填写备注")
 					}
 				}
 			};

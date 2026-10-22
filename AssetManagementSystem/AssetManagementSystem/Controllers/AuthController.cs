@@ -17,18 +17,32 @@ namespace AssetManagementSystem.Controllers
 	[Route("auth")]
 	public class AuthController : ControllerBase
 	{
+		/// <summary>
+		/// 获取图形验证码（登录页与联系请求提交共用，公开接口无需登录）
+		/// 返回验证码ID、SVG 图片(base64)与有效期（秒）
+		/// </summary>
+		[HttpGet("captcha")]
+		public async Task<ApiResult<object>> Captcha()
+		{
+			var result = await _captcha.GenerateAsync();
+			return ApiResult<object>.Success(result, "获取成功");
+		}
+
 		private readonly ISqlSugarClient _db;
 		private readonly IConfiguration _configuration;
 		private readonly SmsCodeService _smsCodeService;
+		private readonly AssetManagementSystem.Services.ICaptchaService _captcha;
 
 		public AuthController(
 			ISqlSugarClient db,
 			IConfiguration configuration,
-			SmsCodeService smsCodeService)
+			SmsCodeService smsCodeService,
+			AssetManagementSystem.Services.ICaptchaService captcha)
 		{
 			_db = db;
 			_configuration = configuration;
 			_smsCodeService = smsCodeService;
+			_captcha = captcha;
 		}
 
 		/// <summary>
@@ -43,7 +57,11 @@ namespace AssetManagementSystem.Controllers
 				if (string.IsNullOrWhiteSpace(loginDto.username) || string.IsNullOrWhiteSpace(loginDto.password))
 					return ApiResult<object>.Fail("400", "用户名或密码不能为空");
 
-				// 2. 查询用户
+				// 2. 图形验证码校验（账号密码登录始终需要，防爆破）
+				if (!await _captcha.ValidateAsync(loginDto.captchaId, loginDto.captcha))
+					return ApiResult<object>.Fail("400", "验证码错误或已失效");
+
+				// 3. 查询用户
 				var user = await _db.Queryable<SysUser>()
 									.Where(u => u.UserId == loginDto.username || u.UserName == loginDto.username)
 									.FirstAsync();

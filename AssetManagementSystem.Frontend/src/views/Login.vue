@@ -32,6 +32,25 @@
                 @keyup.enter="handleLogin"
               />
             </el-form-item>
+            <el-form-item prop="captcha">
+              <div class="code-row">
+                <el-input
+                  v-model="loginForm.captcha"
+                  placeholder="请输入验证码"
+                  prefix-icon="Picture"
+                  clearable
+                  maxlength="4"
+                  @keyup.enter="handleLogin"
+                />
+                <img
+                  class="captcha-img"
+                  :src="captchaImage"
+                  alt="验证码"
+                  title="点击刷新"
+                  @click="fetchCaptcha"
+                />
+              </div>
+            </el-form-item>
             <el-form-item>
               <el-button
                 type="primary"
@@ -44,6 +63,9 @@
             <div class="extra-row">
               <el-link type="primary" :underline="false" @click="openForgot">
                 忘记密码？
+              </el-link>
+              <el-link type="primary" :underline="false" @click="openContact">
+                联系管理员
               </el-link>
             </div>
           </el-form>
@@ -243,15 +265,94 @@
           </el-form-item>
         </el-form>
       </el-dialog>
+
+      <!-- 联系管理员：用户提交重置密码等申请 -->
+      <el-dialog
+        v-model="contactVisible"
+        title="联系管理员"
+        width="400px"
+        destroy-on-close
+        :close-on-click-modal="false"
+      >
+        <el-form
+          ref="contactFormRef"
+          :model="contactForm"
+          :rules="contactRules"
+          label-width="0"
+          @submit.prevent="handleContactSubmit"
+        >
+          <el-form-item prop="account">
+            <el-input
+              v-model="contactForm.account"
+              placeholder="登录账号或姓名（选填）"
+              prefix-icon="User"
+              clearable
+            />
+          </el-form-item>
+          <el-form-item prop="mobile">
+            <el-input
+              v-model="contactForm.mobile"
+              placeholder="手机号（选填）"
+              prefix-icon="Iphone"
+              clearable
+              maxlength="11"
+            />
+          </el-form-item>
+          <el-form-item prop="requestType">
+            <el-select v-model="contactForm.requestType" style="width: 100%" placeholder="请求类型">
+              <el-option label="重置密码" value="reset_password" />
+              <el-option label="其他" value="other" />
+            </el-select>
+          </el-form-item>
+          <el-form-item prop="content">
+            <el-input
+              v-model="contactForm.content"
+              type="textarea"
+              :rows="3"
+              placeholder="请描述您的问题（至少 4 个字）"
+              maxlength="500"
+              show-word-limit
+            />
+          </el-form-item>
+          <el-form-item prop="captcha">
+            <div class="code-row">
+              <el-input
+                v-model="contactForm.captcha"
+                placeholder="请输入验证码"
+                prefix-icon="Picture"
+                clearable
+                maxlength="4"
+              />
+              <img
+                class="captcha-img"
+                :src="contactCaptchaImage"
+                alt="验证码"
+                title="点击刷新"
+                @click="fetchContactCaptcha"
+              />
+            </div>
+          </el-form-item>
+          <el-form-item>
+            <el-button
+              type="primary"
+              native-type="submit"
+              class="login-btn"
+              :loading="contactLoading"
+              >提交</el-button
+            >
+          </el-form-item>
+        </el-form>
+      </el-dialog>
     </el-card>
   </div>
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, reactive, ref } from 'vue'
+import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
-import { login, register, sendSmsCode, smsLogin, forgotPassword } from '@/api/auth'
+import { login, register, sendSmsCode, smsLogin, forgotPassword, getCaptcha } from '@/api/auth'
+import { submitContactRequest } from '@/api/request'
 import { useUserStore } from '@/stores/user'
 
 const router = useRouter()
@@ -287,11 +388,29 @@ const loginFormRef = ref<FormInstance>()
 const loginForm = reactive({
   username: '',
   password: '',
+  captcha: '',
 })
 const loginRules: FormRules = {
   username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
   password: [{ required: true, message: '请输入密码', trigger: 'blur' }],
+  captcha: [{ required: true, message: '请输入验证码', trigger: 'blur' }],
 }
+
+// ============ 图形验证码 ============
+const captchaId = ref('')
+const captchaImage = ref('')
+
+const fetchCaptcha = async () => {
+  try {
+    const res = await getCaptcha()
+    captchaId.value = res?.captchaId ?? ''
+    captchaImage.value = res?.imageBase64 ?? ''
+  } catch {
+    // 获取失败不阻塞登录，用户可点击图片重试
+  }
+}
+
+onMounted(fetchCaptcha)
 
 // ============ 手机号验证码登录 ============
 const smsFormRef = ref<FormInstance>()
@@ -424,12 +543,15 @@ const handleLogin = async () => {
 
   loading.value = true
   try {
-    const res = await login(loginForm.username, loginForm.password)
+    const res = await login(loginForm.username, loginForm.password, loginForm.captcha, captchaId.value)
     afterLogin(res)
   } catch {
     // 失败时拦截器已统一提示
   } finally {
     loading.value = false
+    // 验证码一次性：无论成功失败都刷新
+    loginForm.captcha = ''
+    fetchCaptcha()
   }
 }
 
@@ -495,6 +617,91 @@ const handleForgot = async () => {
     loading.value = false
   }
 }
+
+// ============ 联系管理员 ============
+const contactVisible = ref(false)
+const contactLoading = ref(false)
+const contactFormRef = ref<FormInstance>()
+const contactCaptchaId = ref('')
+const contactCaptchaImage = ref('')
+
+const contactForm = reactive({
+  account: '',
+  mobile: '',
+  requestType: 'reset_password',
+  content: '',
+  captcha: '',
+})
+
+// 账号与手机号至少填一项；填了手机号需格式正确
+const contactValidator = (_rule: any, _value: any, callback: any) => {
+  const hasAccount = !!contactForm.account.trim()
+  const hasMobile = !!contactForm.mobile.trim()
+  if (!hasAccount && !hasMobile) {
+    callback(new Error('请填写账号或手机号'))
+    return
+  }
+  if (hasMobile && !MOBILE_RE.test(contactForm.mobile.trim())) {
+    callback(new Error('手机号格式不正确'))
+    return
+  }
+  callback()
+}
+
+const contactRules: FormRules = {
+  account: [{ validator: contactValidator, trigger: 'blur' }],
+  mobile: [{ validator: contactValidator, trigger: 'blur' }],
+  content: [
+    { required: true, message: '请描述您的问题', trigger: 'blur' },
+    { min: 4, message: '至少 4 个字', trigger: 'blur' },
+  ],
+  captcha: [{ required: true, message: '请输入验证码', trigger: 'blur' }],
+}
+
+const fetchContactCaptcha = async () => {
+  try {
+    const res = await getCaptcha()
+    contactCaptchaId.value = res?.captchaId ?? ''
+    contactCaptchaImage.value = res?.imageBase64 ?? ''
+  } catch {
+    // 失败可点击图片重试
+  }
+}
+
+const openContact = () => {
+  contactForm.account = ''
+  contactForm.mobile = ''
+  contactForm.requestType = 'reset_password'
+  contactForm.content = ''
+  contactForm.captcha = ''
+  contactVisible.value = true
+  fetchContactCaptcha()
+}
+
+const handleContactSubmit = async () => {
+  if (!contactFormRef.value) return
+  await contactFormRef.value.validate()
+
+  contactLoading.value = true
+  try {
+    await submitContactRequest({
+      account: contactForm.account.trim() || undefined,
+      mobile: contactForm.mobile.trim() || undefined,
+      requestType: contactForm.requestType,
+      content: contactForm.content.trim(),
+      captchaId: contactCaptchaId.value,
+      captcha: contactForm.captcha.trim(),
+    })
+    ElMessage.success('提交成功，管理员会尽快处理')
+    contactVisible.value = false
+  } catch {
+    // 失败（含验证码错误）刷新验证码
+    fetchContactCaptcha()
+    contactForm.captcha = ''
+  } finally {
+    contactLoading.value = false
+  }
+}
 </script>
 
 <style scoped>
@@ -529,9 +736,18 @@ const handleForgot = async () => {
   flex-shrink: 0;
   width: 116px;
 }
+.captcha-img {
+  flex-shrink: 0;
+  width: 120px;
+  height: 40px;
+  border-radius: 4px;
+  border: 1px solid #dcdfe6;
+  cursor: pointer;
+}
 .extra-row {
   display: flex;
   justify-content: flex-end;
+  gap: 16px;
   margin-bottom: 4px;
 }
 </style>

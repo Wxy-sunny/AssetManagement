@@ -39,4 +39,7 @@ export const PERMISSIONS = {
 
   NotificationList: 'notification:list',
   NotificationManage: 'notification:manage',
+
+  RequestList: 'request:list',
+  RequestManage: 'request:manage',
 } as const
