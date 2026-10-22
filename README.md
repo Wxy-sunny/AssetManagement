@@ -7,12 +7,15 @@
 
 ## 功能模块
 
-- 用户登录 / JWT 鉴权
-- 资产管理（增删改查、资料附件上传）
+- 用户登录 / JWT 鉴权（账号密码登录强制图形验证码；手机号验证码登录/注册）
+- Token 无感刷新（refresh token 轮换 + 退出登录作废，访问令牌过期不掉线）
+- 登录防爆破（账号连续失败锁定；可选 IP 限流）
+- 资产管理（增删改查、资料附件上传、折旧重算）
 - 资产分类树（支持关键字检索）
 - 部门管理
 - 角色与权限管理（细粒度接口级权限）
-- 通知公告
+- 通知公告（管理员发布）+ 个人消息（联系请求处理回执，未读角标）
+- 联系管理员（登录页公开提交重置密码等申请，管理员处理并回执）
 - 数据仪表盘（ECharts 可视化）
 
 ## 目录结构
@@ -59,6 +62,16 @@ dotnet run
 
 > 数据库表结构由 `DatabaseInitialization` 控制。**首次部署**可临时将该配置 `Enabled` 设为 `true` 以初始化表结构，完成后请改回 `false`。
 
+> 本地开发连接串在 `appsettings.Development.json`（该文件被 `.gitignore` 忽略，不会入库）。若全新克隆后本地无此文件，请手动创建并填入本地数据库连接串：
+>
+> ```json
+> {
+>   "ConnectionStrings": {
+>     "AssetConnection": "Server=localhost;Database=AssetDB;User Id=demo;Password=123456789;TrustServerCertificate=true;"
+>   }
+> }
+> ```
+
 ### 2. 前端
 
 ```bash
@@ -97,6 +110,10 @@ npm run preview  # 本地预览构建产物
 | `DatabaseInitialization:Enabled` | `DatabaseInitialization__Enabled` | 启动建表/结构补齐开关，生产环境设 `false` |
 | `DemoData:Enabled` | `DemoData__Enabled` | 演示数据开关，生产环境设 `false` |
 | `Sms:ReturnCodeInResponse` | `Sms__ReturnCodeInResponse` | 验证码回传前端（仅本地联调），生产环境设 `false` |
+| `Jwt:RefreshExpireDays` | `Jwt__RefreshExpireDays` | 刷新令牌有效期（天，默认 7） |
+| `LoginGuard:MaxFailures` | `LoginGuard__MaxFailures` | 账号登录失败锁定阈值（默认 5 次） |
+| `LoginGuard:LockMinutes` | `LoginGuard__LockMinutes` | 锁定时长（分钟，默认 15） |
+| `LoginGuard:IpLimitEnabled` | `LoginGuard__IpLimitEnabled` | IP 限流开关（默认 `false`；反向代理部署需先配置 ForwardedHeaders 再开启） |
 
 > 说明：若 `Jwt:SecretKey` 为空，启动时会生成**一次性随机密钥**（重启后旧 token 失效），仅适合本地开发，并会打印警告日志。
 
@@ -108,7 +125,51 @@ npm run preview  # 本地预览构建产物
 4. 非开发环境会自动启用 HTTPS 重定向，请配置好 TLS 证书。
 5. 日志默认输出到控制台（`Information` 级别），生产可按需接入文件/集中式日志。
 
+## 日志
+
+- 使用 Serilog 双写：控制台 + 文件。
+- 文件位置：`logs/asset-api-YYYYMMDD.log`（相对于后端运行目录），按天滚动、单文件 50MB 上限、最多保留 31 天。
+- 访问日志（每次请求的方法/路径/状态码/耗时）由 `ApiPipelineMiddleware` 记录；未处理异常记录完整堆栈。
+- 建议将 `logs/` 接入集中式日志（ELK / Loki 等）收集，并按磁盘容量调整保留策略。
+
+## 备份与恢复
+
+备份范围：**SQL Server 数据库**（资产/用户/权限/消息等全部数据）+ **附件目录**（`wwwroot/uploads`，资料管理的上传文件）。日志目录无需备份。
+
+```bash
+# 全量备份（数据库 .bak + 附件 zip），保留最近 14 天
+scripts/backup/Backup-AssetSystem.ps1 -BackupRoot D:\Backups\AssetManagement -Compress
+
+# 从指定备份目录还原（数据库 + 附件）
+scripts/backup/Restore-AssetSystem.ps1 -BackupFolder D:\Backups\AssetManagement\20261022-020000 -RestoreUploads
+```
+
+建议通过 Windows 计划任务每天凌晨执行（备份期间数据库仅有秒级 IO 压力，不影响使用）：
+
+```bat
+schtasks /Create /TN "AssetSystem-Backup" /SC DAILY /ST 02:00 ^
+  /TR "powershell -ExecutionPolicy Bypass -File D:\Backups\Backup-AssetSystem.ps1 -BackupRoot D:\Backups\AssetManagement -Compress"
+```
+
+注意：
+
+- 执行机需安装 `sqlcmd`（随 SQL Server / SSMS 提供），且备份账号需有数据库 `BACKUP` 权限。
+- 备份文件应存放在与数据库服务器**不同的磁盘/机器**上（防单点故障），重要环境建议再加异地副本。
+- 首次部署完成、正式启用前，建议立即做一次"备份 → 还原"演练，确认流程可用。
+
 ## 构建状态
 
 - 后端：`dotnet build` 通过（0 错误）。
 - 前端：`npm run build`（`vue-tsc` 类型检查 + `vite build`）通过。
+
+## 自动化测试
+
+```bash
+cd AssetManagementSystem
+dotnet test
+```
+
+测试分两层：
+
+- **单元测试**（不依赖数据库）：密码哈希（BCrypt）、图形验证码（一次性/大小写）、SVG 安全清洗、登录防爆破锁定逻辑、权限定义一致性（防止新增权限漏配）。
+- **集成测试**（`WebApplicationFactory`，免数据库）：验证码接口、无验证码登录被拒、未登录访问受保护接口返回 401、刷新令牌入参校验等——这些用例都刻意停在访问数据库之前的校验环节，CI 无需数据库即可运行。
