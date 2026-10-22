@@ -64,6 +64,9 @@ if (string.IsNullOrWhiteSpace(jwtSecret))
 {
 	jwtSecret = Convert.ToBase64String(RandomNumberGenerator.GetBytes(48));
 	jwtSecretGenerated = true;
+	// 关键修复：把生成的密钥回写到配置，保证 AuthController 签发 Token 时
+	// 使用与 Program 校验相同的密钥（否则签发用空密钥会抛 500）。
+	builder.Configuration["Jwt:SecretKey"] = jwtSecret;
 }
 
 var jwtIssuer = builder.Configuration["Jwt:Issuer"] ?? "AssetManagementSystem";

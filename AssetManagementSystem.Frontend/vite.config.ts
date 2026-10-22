@@ -15,6 +15,7 @@ export default defineConfig({
     },
   },
   server: {
+    host: true, // 监听 0.0.0.0，允许局域网设备（如手机）通过本机 IP 访问
     proxy: {
       '/api': {
         target: 'http://localhost:5099',   // 后端 HTTP 地址
