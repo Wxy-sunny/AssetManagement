@@ -42,8 +42,7 @@ namespace AssetManagementSystem.Controllers
 			[FromQuery] NotificationQueryDto query)
 		{
 			query ??= new NotificationQueryDto();
-			if (query.pageIndex < 1) query.pageIndex = 1;
-			if (query.pageSize < 1) query.pageSize = 10;
+			(query.pageIndex, query.pageSize) = PageGuard.Normalize(query.pageIndex, query.pageSize);
 
 			var total = 0;
 			var list = await _db.Queryable<Notification>()
@@ -68,8 +67,7 @@ namespace AssetManagementSystem.Controllers
 			[FromQuery] int pageIndex = 1,
 			[FromQuery] int pageSize = 10)
 		{
-			if (pageIndex < 1) pageIndex = 1;
-			if (pageSize < 1) pageSize = 10;
+			(pageIndex, pageSize) = PageGuard.Normalize(pageIndex, pageSize);
 
 			var total = 0;
 			var list = await _db.Queryable<Notification>()

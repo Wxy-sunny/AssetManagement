@@ -165,12 +165,16 @@ namespace AssetManagementSystem.Services
 				}
 			}
 			catch { }
-			// 内存降级：遍历记录的 key 按前缀删除
+			// 内存降级：遍历记录的 key 按前缀删除（同时从记录集合移除，避免只增不减的缓慢泄漏）
 			lock (_memLock)
 			{
 				foreach (var k in _memoryKeys.ToArray())
 				{
-					if (k.StartsWith(prefix)) _memory.Remove(k);
+					if (k.StartsWith(prefix))
+					{
+						_memory.Remove(k);
+						_memoryKeys.Remove(k);
+					}
 				}
 			}
 		}

@@ -92,8 +92,7 @@ namespace AssetManagementSystem.Controllers
 		public async Task<ApiResult<PageResult<ContactRequestDto>>> GetPage([FromQuery] ContactRequestQueryDto query)
 		{
 			query ??= new ContactRequestQueryDto();
-			if (query.pageIndex < 1) query.pageIndex = 1;
-			if (query.pageSize < 1) query.pageSize = 10;
+			(query.pageIndex, query.pageSize) = PageGuard.Normalize(query.pageIndex, query.pageSize);
 
 			// 构建查询条件（总数与分页共用，避免依赖 ToPageListAsync 的计数捕获差异）
 			var q = _db.Queryable<ContactRequest>()

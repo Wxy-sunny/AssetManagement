@@ -39,8 +39,7 @@ namespace AssetManagementSystem.Controllers
 		public async Task<ApiResult<PageResult<AssetDto>>> GetPage([FromQuery] AssetQueryDto query)
 		{
 			query ??= new AssetQueryDto();
-			if (query.pageIndex < 1) query.pageIndex = 1;
-			if (query.pageSize < 1) query.pageSize = 10;
+			(query.pageIndex, query.pageSize) = PageGuard.Normalize(query.pageIndex, query.pageSize);
 
 			var total = 0;
 			var list = await _db.Queryable<Asset>()

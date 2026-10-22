@@ -40,8 +40,7 @@ namespace AssetManagementSystem.Controllers
 		public async Task<ApiResult<PageResult<UserMessageDto>>> GetPage([FromQuery] UserMessageQueryDto query)
 		{
 			query ??= new UserMessageQueryDto();
-			if (query.pageIndex < 1) query.pageIndex = 1;
-			if (query.pageSize < 1) query.pageSize = 10;
+			(query.pageIndex, query.pageSize) = PageGuard.Normalize(query.pageIndex, query.pageSize);
 
 			// 兼容 JWT 入站声明映射：开启映射时 sub 落在 NameIdentifier，未开启时为 sub
 			var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value

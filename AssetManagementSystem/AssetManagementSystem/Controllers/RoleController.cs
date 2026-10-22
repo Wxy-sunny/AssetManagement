@@ -78,8 +78,7 @@ namespace AssetManagementSystem.Controllers
 			[FromQuery] int pageIndex = 1,
 			[FromQuery] int pageSize = 10)
 		{
-			if (pageIndex < 1) pageIndex = 1;
-			if (pageSize < 1) pageSize = 10;
+			(pageIndex, pageSize) = PageGuard.Normalize(pageIndex, pageSize);
 
 			var total = 0;
 			var list = await _db.Queryable<SysRole>()

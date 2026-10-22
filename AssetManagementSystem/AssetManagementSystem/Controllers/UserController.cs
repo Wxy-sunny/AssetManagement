@@ -44,8 +44,7 @@ namespace AssetManagementSystem.Controllers
 			[FromQuery] int pageIndex = 1,
 			[FromQuery] int pageSize = 10)
 		{
-			if (pageIndex < 1) pageIndex = 1;
-			if (pageSize < 1) pageSize = 10;
+			(pageIndex, pageSize) = PageGuard.Normalize(pageIndex, pageSize);
 
 			var key = PageKey(keyword, roleId, deptId, pageIndex, pageSize);
 			var result = await _cache.GetOrSetAsync<PageResult<UserDto>>(

@@ -42,13 +42,14 @@ namespace AssetManagementSystem.Extensions
 				db =>
 				{
 					// 全局 AOP 配置
+					// 说明：SQL 日志默认关闭。原实现每条 SQL 都 Console.WriteLine，
+					// 高并发下同步控制台 I/O 会成为吞吐瓶颈；现改为可配置 + Serilog Debug（默认级别 Information 下零成本丢弃）。
+					var logSql = configuration.GetValue<bool>("SqlSugarConfig:LogSql", false);
 					db.Aop.OnLogExecuting = (sql, pars) =>
 					{
-						// 如果有日志框架，可以替换为：logger.LogInformation(sql);
-						Console.WriteLine($"SQL: {sql}");
-						// 这里可以记录当前使用的 ConfigId
-						var configId = db.CurrentConnectionConfig.ConfigId;
-						Console.WriteLine($"Database: {configId}");
+						if (!logSql) return;
+						Serilog.Log.ForContext("Database", db.CurrentConnectionConfig.ConfigId)
+							.Debug("SQL: {Sql}", sql);
 					};
 				});
 
