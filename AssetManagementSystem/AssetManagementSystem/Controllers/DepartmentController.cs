@@ -20,10 +20,15 @@ namespace AssetManagementSystem.Controllers
 	{
 		private readonly DbServer _dbServer;
 		private readonly ISqlSugarClient _db;
+		private readonly AssetManagementSystem.Services.ICacheService _cache;
 
-		public DepartmentController(DbServer dbServer)
+		private const string TreeKey = CacheKeys.DeptTree;
+		private const string ListKey = CacheKeys.DeptList;
+
+		public DepartmentController(DbServer dbServer, AssetManagementSystem.Services.ICacheService cache)
 		{
 			_dbServer = dbServer;
+			_cache = cache;
 			_db = dbServer.Use(DbNames.Asset);
 		}
 
@@ -34,23 +39,20 @@ namespace AssetManagementSystem.Controllers
 		[Permission(Permissions.DeptList)]
 		public async Task<ApiResult<List<DepartmentDto>>> GetTree([FromQuery] string? keyword = null)
 		{
-			var list = await _db.Queryable<Department>()
-				.WhereIF(!string.IsNullOrWhiteSpace(keyword), d =>
-					d.DepartmentId.Contains(keyword) || d.DepartmentName.Contains(keyword))
-				.OrderBy(d => d.SortOrder)
-				.OrderBy(d => d.DepartmentId)
-				.ToListAsync();
+			if (!string.IsNullOrWhiteSpace(keyword))
+			{
+				return ApiResult<List<DepartmentDto>>.Success(await QueryDeptListAsync(keyword), "获取成功");
+			}
 
-			var dtoList = list.Select(MapToDto).ToList();
-
-			var tree = TreeHelper.BuildTree(
-				dtoList,
-				d => d.id,
-				d => d.parentId,
-				(parent, children) => parent.children = children,
-				rootParentId: null
-			);
-
+			var tree = await _cache.GetOrSetAsync<List<DepartmentDto>>(
+				TreeKey,
+				async () => TreeHelper.BuildTree(
+					await QueryDeptListAsync(null),
+					d => d.id,
+					d => d.parentId,
+					(parent, children) => parent.children = children,
+					rootParentId: null),
+				TimeSpan.FromMinutes(10));
 			return ApiResult<List<DepartmentDto>>.Success(tree, "获取成功");
 		}
 
@@ -61,15 +63,27 @@ namespace AssetManagementSystem.Controllers
 		[Permission(Permissions.DeptList)]
 		public async Task<ApiResult<List<DepartmentDto>>> GetList([FromQuery] string? keyword = null)
 		{
+			if (!string.IsNullOrWhiteSpace(keyword))
+			{
+				return ApiResult<List<DepartmentDto>>.Success(await QueryDeptListAsync(keyword), "获取成功");
+			}
+
+			var list = await _cache.GetOrSetAsync<List<DepartmentDto>>(
+				ListKey,
+				() => QueryDeptListAsync(null),
+				TimeSpan.FromMinutes(10));
+			return ApiResult<List<DepartmentDto>>.Success(list, "获取成功");
+		}
+
+		private async Task<List<DepartmentDto>> QueryDeptListAsync(string? keyword)
+		{
 			var list = await _db.Queryable<Department>()
 				.WhereIF(!string.IsNullOrWhiteSpace(keyword), d =>
 					d.DepartmentId.Contains(keyword) || d.DepartmentName.Contains(keyword))
 				.OrderBy(d => d.SortOrder)
 				.OrderBy(d => d.DepartmentId)
 				.ToListAsync();
-
-			var dtoList = list.Select(MapToDto).ToList();
-			return ApiResult<List<DepartmentDto>>.Success(dtoList, "获取成功");
+			return list.Select(MapToDto).ToList();
 		}
 
 		/// <summary>
@@ -131,9 +145,13 @@ namespace AssetManagementSystem.Controllers
 			};
 
 			var count = await _db.Insertable(entity).ExecuteCommandAsync();
-			return count > 0
-				? ApiResult<object>.Success(new { id = entity.Id }, "新增成功")
-				: ApiResult<object>.Fail("500", "新增失败");
+			if (count > 0)
+			{
+				await _cache.RemoveAsync(TreeKey);
+				await _cache.RemoveAsync(ListKey);
+				return ApiResult<object>.Success(new { id = entity.Id }, "新增成功");
+			}
+			return ApiResult<object>.Fail("500", "新增失败");
 		}
 
 		/// <summary>
@@ -182,9 +200,13 @@ namespace AssetManagementSystem.Controllers
 			entity.UpdateTime = DateTime.Now;
 
 			var count = await _db.Updateable(entity).ExecuteCommandAsync();
-			return count > 0
-				? ApiResult<object>.Success(null, "修改成功")
-				: ApiResult<object>.Fail("500", "修改失败");
+			if (count > 0)
+			{
+				await _cache.RemoveAsync(TreeKey);
+				await _cache.RemoveAsync(ListKey);
+				return ApiResult<object>.Success(null, "修改成功");
+			}
+			return ApiResult<object>.Fail("500", "修改失败");
 		}
 
 		/// <summary>
@@ -210,9 +232,13 @@ namespace AssetManagementSystem.Controllers
 				return ApiResult<object>.Fail("400", "该部门下仍有用户，不能删除");
 
 			var count = await _db.Deleteable(entity).ExecuteCommandAsync();
-			return count > 0
-				? ApiResult<object>.Success(null, "删除成功")
-				: ApiResult<object>.Fail("500", "删除失败");
+			if (count > 0)
+			{
+				await _cache.RemoveAsync(TreeKey);
+				await _cache.RemoveAsync(ListKey);
+				return ApiResult<object>.Success(null, "删除成功");
+			}
+			return ApiResult<object>.Fail("500", "删除失败");
 		}
 
 		private DepartmentDto MapToDto(Department entity)

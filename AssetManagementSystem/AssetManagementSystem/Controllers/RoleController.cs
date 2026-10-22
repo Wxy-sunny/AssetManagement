@@ -20,10 +20,14 @@ namespace AssetManagementSystem.Controllers
 	{
 		private readonly DbServer _dbServer;
 		private readonly ISqlSugarClient _db;
+		private readonly AssetManagementSystem.Services.ICacheService _cache;
 
-		public RoleController(DbServer dbServer)
+		private const string ListKey = CacheKeys.RoleList;
+
+		public RoleController(DbServer dbServer, AssetManagementSystem.Services.ICacheService cache)
 		{
 			_dbServer = dbServer;
+			_cache = cache;
 			_db = dbServer.Use(DbNames.Asset);
 		}
 
@@ -33,6 +37,20 @@ namespace AssetManagementSystem.Controllers
 		[HttpGet("list")]
 		[Permission(Permissions.RoleList)]
 		public async Task<ApiResult<List<RoleDto>>> GetList([FromQuery] string? keyword = null)
+		{
+			if (!string.IsNullOrWhiteSpace(keyword))
+			{
+				return ApiResult<List<RoleDto>>.Success(await BuildRoleListAsync(keyword), "获取成功");
+			}
+
+			var list = await _cache.GetOrSetAsync<List<RoleDto>>(
+				ListKey,
+				() => BuildRoleListAsync(null),
+				TimeSpan.FromMinutes(10));
+			return ApiResult<List<RoleDto>>.Success(list, "获取成功");
+		}
+
+		private async Task<List<RoleDto>> BuildRoleListAsync(string? keyword)
 		{
 			var list = await _db.Queryable<SysRole>()
 				.WhereIF(!string.IsNullOrWhiteSpace(keyword), r =>
@@ -47,8 +65,7 @@ namespace AssetManagementSystem.Controllers
 				dto.userCount = await _db.Queryable<SysUser>().CountAsync(u => u.RoleId == r.RoleId);
 				dtoList.Add(dto);
 			}
-
-			return ApiResult<List<RoleDto>>.Success(dtoList, "获取成功");
+			return dtoList;
 		}
 
 		/// <summary>
@@ -115,9 +132,12 @@ namespace AssetManagementSystem.Controllers
 			};
 
 			var count = await _db.Insertable(entity).ExecuteCommandAsync();
-			return count > 0
-				? ApiResult<object>.Success(new { id = entity.Id }, "新增成功")
-				: ApiResult<object>.Fail("500", "新增失败");
+			if (count > 0)
+			{
+				await _cache.RemoveAsync(ListKey);
+				return ApiResult<object>.Success(new { id = entity.Id }, "新增成功");
+			}
+			return ApiResult<object>.Fail("500", "新增失败");
 		}
 
 		/// <summary>
@@ -158,11 +178,13 @@ namespace AssetManagementSystem.Controllers
 					.SetColumns(u => u.RoleName == entity.RoleName)
 					.Where(u => u.RoleId == entity.RoleId)
 					.ExecuteCommandAsync();
-			}
 
-			return count > 0
-				? ApiResult<object>.Success(null, "修改成功")
-				: ApiResult<object>.Fail("500", "修改失败");
+				// 角色名变化会同步到用户表冗余字段，一并失效角色列表与用户分页缓存
+				await _cache.RemoveAsync(ListKey);
+				await _cache.RemoveByPrefixAsync(CacheKeys.UserPagePrefix);
+				return ApiResult<object>.Success(null, "修改成功");
+			}
+			return ApiResult<object>.Fail("500", "修改失败");
 		}
 
 		/// <summary>
@@ -184,9 +206,12 @@ namespace AssetManagementSystem.Controllers
 				return ApiResult<object>.Fail("400", "该角色下仍有用户，不能删除");
 
 			var count = await _db.Deleteable(entity).ExecuteCommandAsync();
-			return count > 0
-				? ApiResult<object>.Success(null, "删除成功")
-				: ApiResult<object>.Fail("500", "删除失败");
+			if (count > 0)
+			{
+				await _cache.RemoveAsync(ListKey);
+				return ApiResult<object>.Success(null, "删除成功");
+			}
+			return ApiResult<object>.Fail("500", "删除失败");
 		}
 
 		private RoleDto MapToDto(SysRole entity)

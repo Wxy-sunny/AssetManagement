@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Caching.Memory;
 using StackExchange.Redis;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Text.Json;
 
 namespace AssetManagementSystem.Services
@@ -28,6 +29,11 @@ namespace AssetManagementSystem.Services
 		/// 删除缓存（写操作后调用，保证缓存与 DB 一致）
 		/// </summary>
 		Task RemoveAsync(string key);
+
+		/// <summary>
+		/// 按前缀批量删除缓存（如某实体的所有分页缓存键）
+		/// </summary>
+		Task RemoveByPrefixAsync(string prefix);
 	}
 
 	public class CacheService : ICacheService
@@ -38,6 +44,9 @@ namespace AssetManagementSystem.Services
 		private readonly IMemoryCache _memory;
 		// 单 key 互斥锁（进程内，防击穿）。key 数量随业务接口有界，无需清理。
 		private static readonly ConcurrentDictionary<string, SemaphoreSlim> Locks = new();
+		// 内存降级时记录已写入的 key，便于按前缀批量失效
+		private static readonly object _memLock = new();
+		private static readonly HashSet<string> _memoryKeys = new();
 
 		public CacheService(IConnectionMultiplexer redis, IMemoryCache memory)
 		{
@@ -116,7 +125,36 @@ namespace AssetManagementSystem.Services
 			}
 			catch { }
 			_memory.Remove(key);
+			lock (_memLock) _memoryKeys.Remove(key);
 			return Task.CompletedTask;
+		}
+
+		public async Task RemoveByPrefixAsync(string prefix)
+		{
+			try
+			{
+				var db = Db;
+				if (db != null)
+				{
+					var endpoint = _redis.GetEndPoints().FirstOrDefault();
+					if (endpoint != null)
+					{
+						var server = _redis.GetServer(endpoint);
+						var keys = server.Keys(pattern: prefix + "*").ToArray();
+						if (keys.Length > 0) await db.KeyDeleteAsync(keys);
+					}
+					return;
+				}
+			}
+			catch { }
+			// 内存降级：遍历记录的 key 按前缀删除
+			lock (_memLock)
+			{
+				foreach (var k in _memoryKeys.ToArray())
+				{
+					if (k.StartsWith(prefix)) _memory.Remove(k);
+				}
+			}
 		}
 
 		private async Task<string?> GetRawAsync(string key)
@@ -147,6 +185,7 @@ namespace AssetManagementSystem.Services
 			}
 			catch { }
 			_memory.Set(key, value, expire);
+			lock (_memLock) _memoryKeys.Add(key);
 		}
 	}
 }

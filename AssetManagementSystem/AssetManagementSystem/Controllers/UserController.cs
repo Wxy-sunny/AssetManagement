@@ -20,12 +20,17 @@ namespace AssetManagementSystem.Controllers
 	{
 		private readonly DbServer _dbServer;
 		private readonly ISqlSugarClient _db;
+		private readonly AssetManagementSystem.Services.ICacheService _cache;
 
-		public UserController(DbServer dbServer)
+		public UserController(DbServer dbServer, AssetManagementSystem.Services.ICacheService cache)
 		{
 			_dbServer = dbServer;
+			_cache = cache;
 			_db = dbServer.Use(DbNames.Asset);
 		}
+
+		private static string PageKey(string? keyword, string? roleId, string? deptId, int pageIndex, int pageSize)
+			=> $"ams:user:page:{keyword}|{roleId}|{deptId}|{pageIndex}|{pageSize}";
 
 		/// <summary>
 		/// 分页查询用户
@@ -42,6 +47,16 @@ namespace AssetManagementSystem.Controllers
 			if (pageIndex < 1) pageIndex = 1;
 			if (pageSize < 1) pageSize = 10;
 
+			var key = PageKey(keyword, roleId, deptId, pageIndex, pageSize);
+			var result = await _cache.GetOrSetAsync<PageResult<UserDto>>(
+				key,
+				() => BuildUserPageAsync(keyword, roleId, deptId, pageIndex, pageSize),
+				TimeSpan.FromMinutes(5));
+			return ApiResult<PageResult<UserDto>>.Success(result, "获取成功");
+		}
+
+		private async Task<PageResult<UserDto>> BuildUserPageAsync(string? keyword, string? roleId, string? deptId, int pageIndex, int pageSize)
+		{
 			var total = 0;
 			var list = await _db.Queryable<SysUser>()
 				.WhereIF(!string.IsNullOrWhiteSpace(keyword), u =>
@@ -62,8 +77,7 @@ namespace AssetManagementSystem.Controllers
 				dtoList.Add(dto);
 			}
 
-			var result = new PageResult<UserDto>(dtoList, total, pageIndex, pageSize);
-			return ApiResult<PageResult<UserDto>>.Success(result, "获取成功");
+			return new PageResult<UserDto>(dtoList, total, pageIndex, pageSize);
 		}
 
 		/// <summary>
@@ -130,9 +144,13 @@ namespace AssetManagementSystem.Controllers
 			};
 
 			var count = await _db.Insertable(entity).ExecuteCommandAsync();
-			return count > 0
-				? ApiResult<object>.Success(new { id = entity.Id }, "新增成功")
-				: ApiResult<object>.Fail("500", "新增失败");
+			if (count > 0)
+			{
+				await _cache.RemoveByPrefixAsync(CacheKeys.UserPagePrefix);
+				await _cache.RemoveAsync(CacheKeys.RoleList);
+				return ApiResult<object>.Success(new { id = entity.Id }, "新增成功");
+			}
+			return ApiResult<object>.Fail("500", "新增失败");
 		}
 
 		/// <summary>
@@ -181,9 +199,13 @@ namespace AssetManagementSystem.Controllers
 				entity.PassWord = PasswordHelper.Hash(dto.password);
 
 			var count = await _db.Updateable(entity).ExecuteCommandAsync();
-			return count > 0
-				? ApiResult<object>.Success(null, "修改成功")
-				: ApiResult<object>.Fail("500", "修改失败");
+			if (count > 0)
+			{
+				await _cache.RemoveByPrefixAsync(CacheKeys.UserPagePrefix);
+				await _cache.RemoveAsync(CacheKeys.RoleList);
+				return ApiResult<object>.Success(null, "修改成功");
+			}
+			return ApiResult<object>.Fail("500", "修改失败");
 		}
 
 		/// <summary>
@@ -201,9 +223,13 @@ namespace AssetManagementSystem.Controllers
 				return ApiResult<object>.Fail("404", "用户不存在");
 
 			var count = await _db.Deleteable(entity).ExecuteCommandAsync();
-			return count > 0
-				? ApiResult<object>.Success(null, "删除成功")
-				: ApiResult<object>.Fail("500", "删除失败");
+			if (count > 0)
+			{
+				await _cache.RemoveByPrefixAsync(CacheKeys.UserPagePrefix);
+				await _cache.RemoveAsync(CacheKeys.RoleList);
+				return ApiResult<object>.Success(null, "删除成功");
+			}
+			return ApiResult<object>.Fail("500", "删除失败");
 		}
 
 		/// <summary>
@@ -231,9 +257,12 @@ namespace AssetManagementSystem.Controllers
 				.UpdateColumns(u => new { u.IsEnabled, u.StatusCode, u.StatusDesc, u.UpdateTime })
 				.ExecuteCommandAsync();
 
-			return count > 0
-				? ApiResult<object>.Success(null, dto.isEnabled ? "已启用" : "已禁用")
-				: ApiResult<object>.Fail("500", "操作失败");
+			if (count > 0)
+			{
+				await _cache.RemoveByPrefixAsync(CacheKeys.UserPagePrefix);
+				return ApiResult<object>.Success(null, dto.isEnabled ? "已启用" : "已禁用");
+			}
+			return ApiResult<object>.Fail("500", "操作失败");
 		}
 
 		/// <summary>
@@ -259,9 +288,12 @@ namespace AssetManagementSystem.Controllers
 				.UpdateColumns(u => new { u.PassWord, u.UpdateTime })
 				.ExecuteCommandAsync();
 
-			return count > 0
-				? ApiResult<object>.Success(null, "密码重置成功")
-				: ApiResult<object>.Fail("500", "密码重置失败");
+			if (count > 0)
+			{
+				await _cache.RemoveByPrefixAsync(CacheKeys.UserPagePrefix);
+				return ApiResult<object>.Success(null, "密码重置成功");
+			}
+			return ApiResult<object>.Fail("500", "密码重置失败");
 		}
 
 		private UserDto MapToDto(SysUser entity)
