@@ -17,6 +17,7 @@ const getUserInfoFromStorage = () => {
 export const useUserStore = defineStore('user', {
   state: () => ({
     token: localStorage.getItem('token') || '',
+    refreshToken: localStorage.getItem('refreshToken') || '',
     userInfo: getUserInfoFromStorage() || null,   // 存储用户信息对象
   }),
   getters: {
@@ -30,6 +31,11 @@ export const useUserStore = defineStore('user', {
     setToken(token: string) {
       this.token = token;
       localStorage.setItem('token', token);
+    },
+    setRefreshToken(refreshToken: string) {
+      this.refreshToken = refreshToken;
+      if (refreshToken) localStorage.setItem('refreshToken', refreshToken);
+      else localStorage.removeItem('refreshToken');
     },
     setUserInfo(info: any) {
       this.userInfo = info;
@@ -50,8 +56,10 @@ export const useUserStore = defineStore('user', {
     },
     logout() {
       this.token = '';
+      this.refreshToken = '';
       this.userInfo = null;
       localStorage.removeItem('token');
+      localStorage.removeItem('refreshToken');
       localStorage.removeItem('userInfo');
       // 如果当前不在登录页，则跳转
       if (router.currentRoute.value.path !== '/login') {

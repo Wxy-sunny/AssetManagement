@@ -201,6 +201,7 @@ import { useUserStore } from '@/stores/user'
 import { PERMISSIONS } from '@/types'
 import { getRequestPendingCount } from '@/api/request'
 import { getUnreadCount } from '@/api/message'
+import request from '@/utils/request'
 
 const route = useRoute()
 const router = useRouter()
@@ -314,7 +315,16 @@ const handleCommand = (command: string) => {
         confirmButtonText: '确定',
         cancelButtonText: '取消',
         type: 'warning',
-      }).then(() => {
+      }).then(async () => {
+        // 通知服务端作废刷新令牌（失败也不影响本地退出）
+        const refreshToken = localStorage.getItem('refreshToken')
+        if (refreshToken) {
+          try {
+            await request.post('/auth/logout', { refreshToken })
+          } catch {
+            // 网络异常等：本地照常退出
+          }
+        }
         userStore.logout()
         ElMessage.success('已退出登录')
         router.push('/login')

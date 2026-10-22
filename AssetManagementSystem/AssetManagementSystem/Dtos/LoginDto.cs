@@ -1,5 +1,13 @@
 ﻿namespace AssetManagementSystem.Dtos
 {
+	/// <summary>
+	/// 刷新令牌入参（刷新访问令牌 / 退出登录共用）
+	/// </summary>
+	public class RefreshTokenDto
+	{
+		public string? refreshToken { get; set; }
+	}
+
 	public class LoginDto
 	{
 		public string? userid { get; set; }   // 对应数据库的 user_id

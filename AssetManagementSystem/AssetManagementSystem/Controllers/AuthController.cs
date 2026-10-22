@@ -32,17 +32,20 @@ namespace AssetManagementSystem.Controllers
 		private readonly IConfiguration _configuration;
 		private readonly SmsCodeService _smsCodeService;
 		private readonly AssetManagementSystem.Services.ICaptchaService _captcha;
+		private readonly AssetManagementSystem.Services.LoginGuardService _loginGuard;
 
 		public AuthController(
 			ISqlSugarClient db,
 			IConfiguration configuration,
 			SmsCodeService smsCodeService,
-			AssetManagementSystem.Services.ICaptchaService captcha)
+			AssetManagementSystem.Services.ICaptchaService captcha,
+			AssetManagementSystem.Services.LoginGuardService loginGuard)
 		{
 			_db = db;
 			_configuration = configuration;
 			_smsCodeService = smsCodeService;
 			_captcha = captcha;
+			_loginGuard = loginGuard;
 		}
 
 		/// <summary>
@@ -61,6 +64,12 @@ namespace AssetManagementSystem.Controllers
 				if (!await _captcha.ValidateAsync(loginDto.captchaId, loginDto.captcha))
 					return ApiResult<object>.Fail("400", "验证码错误或已失效");
 
+				// 2.5 登录防爆破：账号/IP 失败锁定检查（第二层防护，验证码之后生效）
+				var clientIp = AssetManagementSystem.Services.LoginGuardService.GetClientIp(HttpContext);
+				var (loginLocked, waitMinutes) = await _loginGuard.IsLockedAsync(loginDto.username, clientIp);
+				if (loginLocked)
+					return ApiResult<object>.Fail("429", $"登录失败次数过多，请 {waitMinutes} 分钟后重试，或联系管理员");
+
 				// 3. 查询用户
 				var user = await _db.Queryable<SysUser>()
 									.Where(u => u.UserId == loginDto.username || u.UserName == loginDto.username)
@@ -70,7 +79,10 @@ namespace AssetManagementSystem.Controllers
 				// 说明：登录失败属于业务参数错误，用 400 而非 401，
 				// 401 保留给"Token 失效/未认证"，前端会据此清除登录态并跳转登录页
 				if (user == null || !PasswordHelper.Verify(loginDto.password, user.PassWord, out var needUpgrade))
+				{
+					await _loginGuard.RegisterFailureAsync(loginDto.username, clientIp);
 					return ApiResult<object>.Fail("400", "用户名或密码错误");
+				}
 
 				// 历史明文密码：登录成功后自动升级为 BCrypt 哈希
 				if (needUpgrade)
@@ -81,14 +93,20 @@ namespace AssetManagementSystem.Controllers
 
 				// 4. 检查账号是否启用
 				if (user.IsEnabled == false)
+				{
+					await _loginGuard.RegisterFailureAsync(loginDto.username, clientIp);
 					return ApiResult<object>.Fail("403", "账号已被禁用");
+				}
 
 				// 5. 生成 Token 并更新最后登录时间
 				var result = await BuildToken(user);
 				UpdateLastLoginTime(user);
 
+				// 登录成功：清除失败计数（避免历史失败累积导致误锁）
+				await _loginGuard.ClearAsync(loginDto.username);
+
 				return ApiResult<object>.Success(
-					new { Token = result.Token, UserInfo = result.UserInfo }, "登录成功");
+					new { Token = result.Token, RefreshToken = result.RefreshToken, UserInfo = result.UserInfo }, "登录成功");
 			}
 			catch
 			{
@@ -212,7 +230,7 @@ namespace AssetManagementSystem.Controllers
 				UpdateLastLoginTime(user);
 
 				return ApiResult<object>.Success(
-					new { Token = result.Token, UserInfo = result.UserInfo }, "登录成功");
+					new { Token = result.Token, RefreshToken = result.RefreshToken, UserInfo = result.UserInfo }, "登录成功");
 			}
 			catch
 			{
@@ -512,7 +530,7 @@ namespace AssetManagementSystem.Controllers
 		/// <summary>
 		/// 生成 JWT Token 与脱敏后的用户信息（含该用户拥有的权限编码）
 		/// </summary>
-		private async Task<(string Token, object UserInfo)> BuildToken(SysUser user)
+		private async Task<(string Token, string RefreshToken, object UserInfo)> BuildToken(SysUser user)
 		{
 			var claims = new[]
 			{
@@ -540,8 +558,111 @@ namespace AssetManagementSystem.Controllers
 			var tokenString = tokenHandler.WriteToken(tokenHandler.CreateToken(tokenDescriptor));
 
 			var userInfo = await BuildUserInfo(user);
-			return (tokenString, userInfo);
-		}
+
+			// 签发刷新令牌（明文返回给客户端，数据库只存哈希）
+			var refreshToken = Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(48));
+			var refreshDays = _configuration.GetValue<int>("Jwt:RefreshExpireDays", 7);
+			var clientIp = AssetManagementSystem.Services.LoginGuardService.GetClientIp(HttpContext);
+
+			await _db.Insertable(new RefreshToken
+			{
+				Id = Guid.NewGuid().ToString(),
+				UserId = user.Id,
+				TokenHash = HashRefreshToken(refreshToken),
+				ExpiresTime = DateTime.Now.AddDays(refreshDays),
+				IsRevoked = false,
+				CreatedIp = clientIp,
+				IsEnabled = true,
+				CreateTime = DateTime.Now
+			}).ExecuteCommandAsync();
+
+			// 顺手清理长期过期/作废的令牌，避免表无限增长
+			await _db.Deleteable<RefreshToken>()
+				.Where(t => t.ExpiresTime < DateTime.Now.AddDays(-1))
+				.ExecuteCommandAsync();
+
+			return (tokenString, refreshToken, userInfo);
+			}
+
+			/// <summary>
+			/// 刷新访问令牌（滑动续期）：校验刷新令牌 → 轮换（旧作废、签新对）→ 返回新令牌对。
+			/// </summary>
+			[HttpPost("refresh")]
+			public async Task<ApiResult<object>> Refresh([FromBody] RefreshTokenDto dto)
+			{
+			try
+			{
+				var token = dto?.refreshToken;
+				if (string.IsNullOrWhiteSpace(token))
+					return ApiResult<object>.Fail("400", "刷新令牌不能为空");
+
+				var entity = await _db.Queryable<RefreshToken>()
+					.FirstAsync(t => t.TokenHash == HashRefreshToken(token));
+
+				if (entity == null)
+					return ApiResult<object>.Fail("401", "刷新令牌无效，请重新登录");
+				if (entity.IsRevoked == true)
+					return ApiResult<object>.Fail("401", "刷新令牌已失效，请重新登录");
+				if (entity.ExpiresTime <= DateTime.Now)
+					return ApiResult<object>.Fail("401", "登录状态已过期，请重新登录");
+
+				var user = await _db.Queryable<SysUser>().FirstAsync(u => u.Id == entity.UserId);
+				if (user == null || user.IsEnabled == false)
+					return ApiResult<object>.Fail("401", "账号不存在或已被禁用，请重新登录");
+
+				// 轮换：作废旧令牌，再签发新的一对
+				entity.IsRevoked = true;
+				entity.UpdateTime = DateTime.Now;
+				await _db.Updateable(entity)
+					.UpdateColumns(t => new { t.IsRevoked, t.UpdateTime })
+					.ExecuteCommandAsync();
+
+				var result = await BuildToken(user);
+				return ApiResult<object>.Success(
+					new { Token = result.Token, RefreshToken = result.RefreshToken, UserInfo = result.UserInfo },
+					"刷新成功");
+			}
+			catch
+			{
+				return ApiResult<object>.Fail("500", "系统繁忙，请稍后再试");
+			}
+			}
+
+			/// <summary>
+			/// 退出登录：作废当前刷新令牌（访问令牌因其无状态性仍会自然过期）
+			/// </summary>
+			[HttpPost("logout")]
+			public async Task<ApiResult<object>> Logout([FromBody] RefreshTokenDto dto)
+			{
+			try
+			{
+				if (!string.IsNullOrWhiteSpace(dto?.refreshToken))
+				{
+					var hash = HashRefreshToken(dto.refreshToken);
+					var entity = await _db.Queryable<RefreshToken>()
+						.FirstAsync(t => t.TokenHash == hash && (t.IsRevoked == null || t.IsRevoked == false));
+					if (entity != null)
+					{
+						entity.IsRevoked = true;
+						entity.UpdateTime = DateTime.Now;
+						await _db.Updateable(entity)
+							.UpdateColumns(t => new { t.IsRevoked, t.UpdateTime })
+							.ExecuteCommandAsync();
+					}
+				}
+				return ApiResult<object>.Success(null, "已退出登录");
+			}
+			catch
+			{
+				return ApiResult<object>.Fail("500", "系统繁忙，请稍后再试");
+			}
+			}
+
+			/// <summary>刷新令牌哈希（SHA256 十六进制小写）</summary>
+			private static string HashRefreshToken(string token)
+			{
+			return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(token))).ToLowerInvariant();
+			}
 
 		/// <summary>
 		/// 异步更新最后登录时间（不阻塞主流程）

@@ -57,6 +57,82 @@ request.interceptors.request.use(
 );
 
 
+// ============ Token 无感刷新（访问令牌过期时自动续期） ============
+let isRefreshing = false
+// 刷新期间到达的 401 请求排队等待，刷新成功后统一重放
+let refreshWaiters: Array<(token: string) => void> = []
+
+// 调用刷新接口：成功则更新本地令牌并返回新的访问令牌；失败返回 null
+const tryRefreshToken = async (): Promise<string | null> => {
+  const refreshToken = localStorage.getItem('refreshToken')
+  if (!refreshToken) return null
+  try {
+    // 用原生 axios 发起，避免被本文件的拦截器递归处理
+    const resp = await axios.post('/api/auth/refresh', { refreshToken })
+    const data = resp.data
+    if (data?.code === 200 && data.data?.token) {
+      localStorage.setItem('token', data.data.token)
+      if (data.data.refreshToken) {
+        localStorage.setItem('refreshToken', data.data.refreshToken)
+      }
+      if (data.data.userInfo) {
+        localStorage.setItem('userInfo', JSON.stringify(data.data.userInfo))
+      }
+      return data.data.token
+    }
+  } catch {
+    // 刷新失败（刷新令牌过期 / 已被顶掉 / 网络异常）
+  }
+  return null
+}
+
+// 跳转登录页并清理登录态
+const goLogin = (msg = '登录状态已过期，请重新登录') => {
+  ElMessage.error(msg)
+  localStorage.clear()
+  if (!window.location.pathname.includes('/login')) {
+    window.location.href = '/login'
+  }
+}
+
+// 统一 401 处理：先尝试刷新令牌并重放原请求；无法刷新则回登录页
+const handleUnauthorized = async (originalConfig: InternalAxiosRequestConfig): Promise<any> => {
+  const cfg = originalConfig as CustomAxiosRequestConfig & { _retry?: boolean }
+  // 已重试过一次仍 401，说明刷新也没用，直接回登录页
+  if (cfg._retry) {
+    goLogin()
+    return Promise.reject(new Error('Unauthorized'))
+  }
+  cfg._retry = true
+
+  // 正在刷新中：排队等待，刷新成功后用新令牌重放
+  if (isRefreshing) {
+    return new Promise((resolve, reject) => {
+      refreshWaiters.push((token) => {
+        cfg.headers = cfg.headers || {}
+        ;(cfg.headers as any).Authorization = `Bearer ${token}`
+        request(cfg).then(resolve).catch(reject)
+      })
+    })
+  }
+
+  isRefreshing = true
+  const newToken = await tryRefreshToken()
+  isRefreshing = false
+
+  if (newToken) {
+    refreshWaiters.forEach((cb) => cb(newToken))
+    refreshWaiters = []
+    cfg.headers = cfg.headers || {}
+    ;(cfg.headers as any).Authorization = `Bearer ${newToken}`
+    return request(cfg)
+  }
+
+  refreshWaiters = []
+  goLogin()
+  return Promise.reject(new Error('Unauthorized'))
+}
+
 // 3. 响应拦截器
 request.interceptors.response.use(
   (response: AxiosResponse) => {
@@ -81,16 +157,9 @@ request.interceptors.response.use(
     if (code === 0 || code === 200) {
       return apiResult; 
     } 
-    else if (code === 401) {
-      // --- Token 失效处理 (防死循环) ---
-      ElMessage.error(message || '登录已过期，请重新登录');
-      //localStorage.removeItem('token');
-      localStorage.clear();
-      // 跳转到登录页（如果不在登录页才跳，避免死循环）
-      if (!window.location.pathname.includes('/login')) {
-        window.location.href = '/login';
-      }
-      return Promise.reject(new Error('Unauthorized'));
+    else if (code === 401 || code === '401') {
+      // --- 业务 401（如"登录信息无效"）：尝试刷新令牌并重放，失败再回登录页 ---
+      return handleUnauthorized(response.config);
     } else {
       // 普通业务错误（如 400 参数错误）
       // 把业务码挂到 Error 上，便于调用方针对不同 code 做分支处理
@@ -113,13 +182,12 @@ request.interceptors.response.use(
       return Promise.reject(error);
     }
 
-    // HTTP 401：Token 失效（过期 / 无效），清除登录态并跳转登录页
+    // HTTP 401：Token 失效（过期 / 无效）——先尝试无感刷新并重放，失败再回登录页
     if (error.response?.status === 401) {
-      ElMessage.error('登录已过期，请重新登录');
-      localStorage.clear();
-      if (!window.location.pathname.includes('/login')) {
-        window.location.href = '/login';
+      if (error.config) {
+        return handleUnauthorized(error.config as InternalAxiosRequestConfig);
       }
+      goLogin()
       return Promise.reject(error);
     }
 

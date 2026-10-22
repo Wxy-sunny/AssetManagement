@@ -532,6 +532,8 @@ const afterLogin = (res: any) => {
     return
   }
   userStore.setToken(res.token)
+  // 刷新令牌：访问令牌过期时用于无感续期（后端轮换签发）
+  if (res.refreshToken) userStore.setRefreshToken(res.refreshToken)
   userStore.setUserInfo(res.userInfo)
   ElMessage.success('登录成功')
   router.push('/dashboard')
