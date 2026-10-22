@@ -52,6 +52,11 @@ namespace AssetManagementSystem.Controllers
 		[Permission(Permissions.FileUpload)]
 		public async Task<ApiResult<object>> Upload()
 		{
+			// 兜底：非 multipart/form-data 请求（如客户端误发 application/json）直接返回友好 400，
+			// 避免 ReadFormAsync 抛 Incorrect Content-Type 变成 500
+			if (!Request.HasFormContentType)
+				return ApiResult<object>.Fail("400", "请求格式错误：上传必须使用 multipart/form-data");
+
 			var form = await Request.ReadFormAsync();
 			var files = form.Files;
 			if (files == null || files.Count == 0)

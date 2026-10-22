@@ -14,13 +14,14 @@ const getPendingKey = (config: InternalAxiosRequestConfig) => {
 };
 
 
-// 1. 创建实例 
+// 1. 创建实例
+// 注意：不要在这里设置全局 Content-Type: application/json。
+// axios v1 在"全局 JSON 头 + FormData 数据"时会把 FormData 字符串化成 {}，
+// 导致服务端 ReadFormAsync 报 Incorrect Content-Type（文件上传 500）。
+// 改为在请求拦截器中按请求体类型动态设置。
 const request = axios.create({
   baseURL: '/api', 
   timeout: 15000, // 15秒超时,不要设置太短了，之前设置成15，导致永远超时
-  headers: {
-    'Content-Type': 'application/json' 
-  }
 });
 
 // 2. 请求拦截器
@@ -44,6 +45,17 @@ request.interceptors.request.use(
     const token = localStorage.getItem('token');
     if (token && !config.url?.includes('/login')) {
       config.headers.Authorization = `Bearer ${token}`;
+    }
+
+    // --- 按请求体类型设置 Content-Type ---
+    // FormData（文件上传）：不设置，由浏览器自动生成 multipart/form-data 及 boundary；
+    // 其余带 body 的请求：按 JSON 提交。
+    if (config.data instanceof FormData) {
+      const h = config.headers as any
+      if (typeof h?.delete === 'function') h.delete('Content-Type')
+      else delete h?.['Content-Type']
+    } else if (config.data !== undefined && config.data !== null) {
+      config.headers['Content-Type'] = 'application/json'
     }
 
     // 防止 GET 请求缓存
