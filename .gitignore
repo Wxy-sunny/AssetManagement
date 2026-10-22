@@ -15,12 +15,12 @@ dist-ssr/
 .env
 .env.*
 
-# Uploaded files (user data)
-wwwroot/uploads/
+# Uploaded files (user data) —— **/ 匹配任意深度，避免嵌套项目目录漏掉
+**/wwwroot/uploads/
 
 # Logs
 *.log
-logs/
+**/logs/
 
 # Environment-specific settings (keep base appsettings.json)
 appsettings.*.json
