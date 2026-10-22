@@ -56,6 +56,13 @@ const router = createRouter({
           component: () => import('@/views/notification/NoticeBoard.vue'),
           meta: { title: '系统通知' },
         },
+        // 我的消息（个人收件箱，登录即可）
+        {
+          path: '/messages',
+          name: 'MyMessages',
+          component: () => import('@/views/message/MyMessages.vue'),
+          meta: { title: '我的消息' },
+        },
         {
           path: '/system/notifications',
           name: 'NotificationManage',

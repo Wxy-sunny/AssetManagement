@@ -10,3 +10,4 @@ export * from './file';
 export * from './dashboard';
 export * from './permission';
 export * from './notification';
+export * from './message';

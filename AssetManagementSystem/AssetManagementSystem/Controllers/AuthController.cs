@@ -229,7 +229,9 @@ namespace AssetManagementSystem.Controllers
 		{
 			try
 			{
-				var userId = User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
+				// 兼容 JWT 入站声明映射：开启映射时 sub 落在 NameIdentifier，未开启时为 sub
+				var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value
+					?? User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
 				if (string.IsNullOrWhiteSpace(userId))
 					return ApiResult<object>.Fail("401", "登录信息无效，请重新登录");
 
@@ -322,7 +324,9 @@ namespace AssetManagementSystem.Controllers
 		{
 			try
 			{
-				var userId = User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
+				// 兼容 JWT 入站声明映射：开启映射时 sub 落在 NameIdentifier，未开启时为 sub
+				var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value
+					?? User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
 				if (string.IsNullOrWhiteSpace(userId))
 					return ApiResult<object>.Fail("401", "登录信息无效，请重新登录");
 
@@ -371,7 +375,9 @@ namespace AssetManagementSystem.Controllers
 		{
 			try
 			{
-				var userId = User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
+				// 兼容 JWT 入站声明映射：开启映射时 sub 落在 NameIdentifier，未开启时为 sub
+				var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value
+					?? User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
 				if (string.IsNullOrWhiteSpace(userId))
 					return ApiResult<object>.Fail("401", "登录信息无效，请重新登录");
 
@@ -423,7 +429,9 @@ namespace AssetManagementSystem.Controllers
 		{
 			try
 			{
-				var userId = User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
+				// 兼容 JWT 入站声明映射：开启映射时 sub 落在 NameIdentifier，未开启时为 sub
+				var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value
+					?? User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
 				if (string.IsNullOrWhiteSpace(userId))
 					return ApiResult<object>.Fail("401", "登录信息无效，请重新登录");
 

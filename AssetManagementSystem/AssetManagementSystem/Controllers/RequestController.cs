@@ -24,12 +24,14 @@ namespace AssetManagementSystem.Controllers
 		private readonly DbServer _dbServer;
 		private readonly ISqlSugarClient _db;
 		private readonly ICaptchaService _captcha;
+		private readonly SmsCodeService _sms;
 
-		public RequestController(DbServer dbServer, ICaptchaService captcha)
+		public RequestController(DbServer dbServer, ICaptchaService captcha, SmsCodeService sms)
 		{
 			_dbServer = dbServer;
 			_db = dbServer.Use(DbNames.Asset);
 			_captcha = captcha;
+			_sms = sms;
 		}
 
 		/// <summary>
@@ -137,6 +139,10 @@ namespace AssetManagementSystem.Controllers
 			if (entity == null)
 				return ApiResult<object>.Fail("404", "请求不存在");
 
+			// 已处理过的请求直接返回，避免重复通知
+			if (entity.Status == RequestStatus.Handled)
+				return ApiResult<object>.Success(null, "该请求已处理过");
+
 			entity.Status = RequestStatus.Handled;
 			entity.HandlerName = User.Identity?.Name;
 			entity.HandleTime = DateTime.Now;
@@ -146,9 +152,71 @@ namespace AssetManagementSystem.Controllers
 			var count = await _db.Updateable(entity)
 				.UpdateColumns(r => new { r.Status, r.HandlerName, r.HandleTime, r.HandleRemark, r.UpdateTime })
 				.ExecuteCommandAsync();
-			return count > 0
-				? ApiResult<object>.Success(null, "已标记为已处理")
-				: ApiResult<object>.Fail("500", "操作失败");
+			if (count <= 0)
+				return ApiResult<object>.Fail("500", "操作失败");
+
+			// 处理成功后：向提交人回发站内消息（点对点），并按需发送短信
+			var (messageSent, smsSent) = await NotifyRequesterAsync(entity, dto?.notifySms != false);
+
+			var tip = "已标记为已处理";
+			if (messageSent && smsSent) tip += "，已通知用户并发送短信";
+			else if (messageSent) tip += "，已通知用户";
+			else if (smsSent) tip += "，已发送短信";
+			else tip += "（未能识别提交人账号，仅记录了处理结果）";
+			return ApiResult<object>.Success(new { messageSent, smsSent }, tip);
+		}
+
+		/// <summary>
+		/// 回发处理结果给提交人：
+		/// 1) 站内个人消息（需能解析到收件用户：优先 senderId，其次账号，最后手机号）；
+		/// 2) 短信（填写了手机号且勾选时发送）。
+		/// 返回 (是否发送了站内消息, 是否发送了短信)。
+		/// </summary>
+		private async Task<(bool messageSent, bool smsSent)> NotifyRequesterAsync(ContactRequest entity, bool notifySms)
+		{
+			var messageSent = false;
+			var smsSent = false;
+
+			// 1. 解析收件用户
+			SysUser? recipient = null;
+			if (!string.IsNullOrWhiteSpace(entity.SenderId))
+				recipient = await _db.Queryable<SysUser>().FirstAsync(u => u.Id == entity.SenderId);
+			if (recipient == null && !string.IsNullOrWhiteSpace(entity.Account))
+				recipient = await _db.Queryable<SysUser>().FirstAsync(u => u.UserId == entity.Account);
+			if (recipient == null && !string.IsNullOrWhiteSpace(entity.Mobile))
+				recipient = await _db.Queryable<SysUser>().FirstAsync(u => u.Mobile == entity.Mobile);
+
+			var typeName = entity.RequestType == RequestTypes.ResetPassword ? "重置密码" : "咨询/其他";
+			var title = $"您的【{typeName}】申请已处理";
+			var remarkPart = string.IsNullOrWhiteSpace(entity.HandleRemark) ? "" : $"处理备注：{entity.HandleRemark}。";
+			var content = $"您提交的申请已由管理员（{entity.HandlerName ?? "系统"}）处理。{remarkPart}如有疑问，请再次联系管理员。";
+
+			// 2. 写入站内个人消息
+			if (recipient != null)
+			{
+				var msg = new UserMessage
+				{
+					RecipientId = recipient.Id,
+					Title = title,
+					Content = content,
+					MsgType = UserMessageTypes.RequestReply,
+					IsRead = false,
+					SourceId = entity.Id,
+					IsEnabled = true,
+					CreateTime = DateTime.Now
+				};
+				messageSent = await _db.Insertable(msg).ExecuteCommandAsync() > 0;
+			}
+
+			// 3. 发送短信（勾选且有手机号时）
+			if (notifySms && !string.IsNullOrWhiteSpace(entity.Mobile))
+			{
+				var smsText = $"【资产管理系统】您的{typeName}申请已处理。{remarkPart}请登录系统查看详情。";
+				await _sms.SendTextAsync(entity.Mobile, smsText);
+				smsSent = true;
+			}
+
+			return (messageSent, smsSent);
 		}
 
 		private ContactRequestDto MapToDto(ContactRequest e) => new ContactRequestDto

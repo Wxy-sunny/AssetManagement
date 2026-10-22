@@ -50,6 +50,18 @@
             <el-icon><ChatDotRound /></el-icon>
             <template #title>系统通知</template>
           </el-menu-item>
+          <el-menu-item index="/messages">
+            <el-icon><Message /></el-icon>
+            <template #title>
+              我的消息
+              <el-badge
+                v-if="msgUnreadCount > 0"
+                :value="msgUnreadCount"
+                :max="99"
+                class="menu-badge"
+              />
+            </template>
+          </el-menu-item>
           <el-menu-item v-if="menuPerm.notifications" index="/system/notifications">
             <el-icon><EditPen /></el-icon>
             <template #title>通知管理</template>
@@ -177,6 +189,7 @@ import {
   Bell,
   ChatDotRound,
   EditPen,
+  Message,
   Lock,
   SwitchButton,
   ChatLineSquare,
@@ -187,6 +200,7 @@ import {
 import { useUserStore } from '@/stores/user'
 import { PERMISSIONS } from '@/types'
 import { getRequestPendingCount } from '@/api/request'
+import { getUnreadCount } from '@/api/message'
 
 const route = useRoute()
 const router = useRouter()
@@ -213,12 +227,13 @@ const addTag = (r: RouteLocationNormalizedLoaded) => {
   }
 }
 
-// 路由变化时自动追加页签，进入联系请求页时刷新待处理角标
+// 路由变化时自动追加页签，进入联系请求页时刷新待处理角标，进入我的消息页时刷新未读数
 watch(
   () => route.path,
   (p) => {
     addTag(route)
     if (p === '/system/requests') loadPendingCount()
+    if (p === '/messages') loadMsgUnreadCount()
   },
   { immediate: true },
 )
@@ -265,7 +280,20 @@ const loadPendingCount = async () => {
   }
 }
 
-onMounted(loadPendingCount)
+// 个人消息未读数量（菜单角标，登录即可，无权限门槛）
+const msgUnreadCount = ref(0)
+const loadMsgUnreadCount = async () => {
+  try {
+    msgUnreadCount.value = await getUnreadCount()
+  } catch {
+    msgUnreadCount.value = 0
+  }
+}
+
+onMounted(() => {
+  loadPendingCount()
+  loadMsgUnreadCount()
+})
 
 // 处理下拉菜单命令
 const handleCommand = (command: string) => {

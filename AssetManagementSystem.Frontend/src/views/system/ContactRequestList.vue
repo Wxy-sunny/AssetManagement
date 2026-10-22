@@ -105,6 +105,16 @@
         </el-descriptions-item>
       </el-descriptions>
 
+      <el-alert
+        v-if="current.status === 'pending'"
+        type="info"
+        :closable="false"
+        show-icon
+        class="notify-tip"
+      >
+        处理后将自动向提交人发送一条站内消息通知（需能识别其账号）；如填写了手机号，可选择同时发送短信。
+      </el-alert>
+
       <el-form label-width="80px" class="handle-form">
         <el-form-item :label="current.status === 'handled' ? '处理备注' : '处理备注'">
           <el-input
@@ -116,6 +126,11 @@
             maxlength="500"
             show-word-limit
           />
+        </el-form-item>
+        <el-form-item v-if="current.status === 'pending'" label="短信通知">
+          <el-checkbox v-model="notifySms" :disabled="!current.mobile">
+            同时发送短信{{ current.mobile ? `（${current.mobile}）` : '（未填写手机号）' }}
+          </el-checkbox>
         </el-form-item>
       </el-form>
 
@@ -162,6 +177,7 @@ const dialogVisible = ref(false)
 const dialogTitle = ref('处理联系请求')
 const current = ref<ContactRequestItem>({})
 const remark = ref('')
+const notifySms = ref(true)
 
 const loadData = async () => {
   loading.value = true
@@ -196,6 +212,7 @@ const handleReset = () => {
 const openHandle = (row: ContactRequestItem) => {
   current.value = { ...row }
   remark.value = row.handleRemark || ''
+  notifySms.value = true
   dialogTitle.value = row.status === 'handled' ? '查看联系请求' : '处理联系请求'
   dialogVisible.value = true
 }
@@ -204,8 +221,8 @@ const submitHandle = async () => {
   if (!current.value.id) return
   submitting.value = true
   try {
-    await handleRequest(current.value.id, remark.value.trim())
-    ElMessage.success('已标记为已处理')
+    await handleRequest(current.value.id, remark.value.trim(), notifySms.value)
+    ElMessage.success('已标记为已处理，处理结果将通知提交人')
     dialogVisible.value = false
     loadData()
   } catch {
@@ -232,5 +249,8 @@ onMounted(loadData)
 }
 .handle-form {
   margin-top: 16px;
+}
+.notify-tip {
+  margin-bottom: 12px;
 }
 </style>

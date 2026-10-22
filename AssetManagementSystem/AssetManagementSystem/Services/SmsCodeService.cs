@@ -144,5 +144,31 @@ namespace AssetManagementSystem.Services
 		/// </summary>
 		public bool ReturnCodeInResponse =>
 			_configuration.GetValue<bool>("Sms:ReturnCodeInResponse", false);
+
+		/// <summary>
+		/// 是否启用文本类短信通知（如联系请求处理结果回执）
+		/// </summary>
+		public bool TextNotifyEnabled =>
+			_configuration.GetValue<bool>("Sms:EnableTextNotify", true);
+
+		/// <summary>
+		/// 发送一条文本短信（通用，非验证码）
+		/// 说明：当前未接入真实短信网关，仅打印到控制台（与验证码一致）；
+		/// 接入网关后，在此方法中调用对应 SDK 发送即可。
+		/// </summary>
+		/// <param name="mobile">手机号</param>
+		/// <param name="text">短信内容（含签名，建议不超过 70 字）</param>
+		public Task SendTextAsync(string? mobile, string text)
+		{
+			if (string.IsNullOrWhiteSpace(mobile) || string.IsNullOrWhiteSpace(text))
+				return Task.CompletedTask;
+
+			if (!TextNotifyEnabled)
+				return Task.CompletedTask;
+
+			// TODO: 接入真实短信网关（阿里云 / 腾讯云等）后替换为实际发送调用
+			Console.WriteLine($"[SMS] 发送文本短信至 {mobile}：{text}");
+			return Task.CompletedTask;
+		}
 	}
 }

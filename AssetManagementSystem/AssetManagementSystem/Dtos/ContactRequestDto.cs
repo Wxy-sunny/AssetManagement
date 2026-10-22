@@ -45,5 +45,11 @@ namespace AssetManagementSystem.Dtos
 	public class HandleRequestDto
 	{
 		public string? remark { get; set; }
+
+		/// <summary>
+		/// 处理时是否同时向用户发送短信通知（默认 true）。
+		/// 站内消息始终会发送（若能量解析到收件用户）；此开关仅控制短信。
+		/// </summary>
+		public bool? notifySms { get; set; } = true;
 	}
 }

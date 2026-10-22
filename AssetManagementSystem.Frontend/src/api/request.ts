@@ -62,7 +62,13 @@ export function getRequestPendingCount(): Promise<number> {
   return request.get('/request/pending-count').then((res: any) => res?.data ?? 0)
 }
 
-// 管理员：标记已处理
-export function handleRequest(id: string, remark?: string): Promise<any> {
-  return request.put(`/request/${id}/handle`, { remark }).then((res: any) => res?.data)
+// 管理员：标记已处理（remark 处理备注；notifySms 是否同时发送短信，默认 true）
+export function handleRequest(
+  id: string,
+  remark?: string,
+  notifySms: boolean = true,
+): Promise<any> {
+  return request
+    .put(`/request/${id}/handle`, { remark, notifySms })
+    .then((res: any) => res?.data)
 }
