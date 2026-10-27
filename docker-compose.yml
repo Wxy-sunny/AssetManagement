@@ -2,10 +2,10 @@
 # 资产管理系统 - Docker Compose
 # 用法：
 #   1) 复制 .env.example 为 .env 并填入真实值（.env 已被 .gitignore 忽略）
-#   2) 启动全部服务（后端 + 前端 + Redis，SQLite 内置数据库，无需 SQL Server）：
-#        docker compose up -d
-#   数据库类型由 .env 的 DbType 决定：sqlite（默认，省内存，适合 2GB 小机）/
-#   sqlserver（需另起 db 容器并设 AssetConnection=Server=db,1433;...）。
+#   本分支（sqlserver-docker）默认自带 SQL Server 容器；
+#   若改用 SQLite，请把 .env 的 DbType 改为 sqlite、填入 AssetConnection=DataSource=/app/data/asset.db，
+#   并移除下方 db 服务（或切到 sqlite 分支）。启动：docker compose up -d
+#   数据库类型由 .env 的 DbType 决定：sqlserver（默认）/ sqlite（需移除 db 服务）。
 #   注意：前端已映射 80 端口（纯 HTTP）。公网 HTTPS 请在宿主机外层再做 TLS 终止。
 # ============================================================
 name: asset-management
@@ -33,10 +33,11 @@ services:
       DatabaseInitialization__CreateTablesOnStartup: "true"
     expose:
       - "5099"
-    volumes:
-      - asset-data:/app/data
     depends_on:
-      - redis
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
     restart: unless-stopped
 
   frontend:
@@ -55,6 +56,24 @@ services:
     volumes:
       - redis-data:/data
 
+  # 自带 SQL Server：应用连接串默认指向本服务（Server=db,1433），随栈启动。
+  db:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: ${DbSaPassword}
+    ports:
+      - "1433:1433"
+    volumes:
+      - mssql-data:/var/opt/mssql
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 5 bash -c '</dev/tcp/localhost/1433' && exit 0 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+    restart: unless-stopped
+
 volumes:
   redis-data:
-  asset-data:
+  mssql-data:
