@@ -16,6 +16,9 @@ namespace AssetManagementSystem.Services
 		/// 说明：账号已存在时不会做任何修改（不覆盖密码），因此可重复执行、安全幂等。
 		/// 密码在运行时用 BCrypt 实时生成哈希（带随机盐），不存储明文。
 		/// </summary>
+		/// <summary>管理员默认头像：蓝色系内置头像（与默认主题主色呼应）</summary>
+		private const string DefaultAdminAvatar = "/avatars/blue01.jpg";
+
 		public static void SeedAdmin(ISqlSugarClient db, IConfiguration configuration)
 		{
 			var enabled = configuration.GetValue<bool>("AdminSeed:Enabled", true);
@@ -64,14 +67,15 @@ namespace AssetManagementSystem.Services
 			var exists = db.Queryable<SysUser>().Any(u => u.UserId == userId);
 			if (exists)
 			{
-				// 已存在时顺带兜底：角色为空会导致登录后没有任何权限
+				// 已存在时顺带兜底：角色为空会导致登录后没有任何权限；头像为空则补默认头像
 				var admin = db.Queryable<SysUser>().First(u => u.UserId == userId);
-				if (admin != null && string.IsNullOrWhiteSpace(admin.RoleId))
+				if (admin != null && (string.IsNullOrWhiteSpace(admin.RoleId) || string.IsNullOrWhiteSpace(admin.Avatar)))
 				{
 					admin.RoleId = roleId;
 					admin.RoleName = roleName;
+					admin.Avatar = DefaultAdminAvatar;
 					db.Updateable(admin)
-						.UpdateColumns(u => new { u.RoleId, u.RoleName })
+						.UpdateColumns(u => new { u.RoleId, u.RoleName, u.Avatar })
 						.ExecuteCommand();
 				}
 				return;
@@ -86,6 +90,7 @@ namespace AssetManagementSystem.Services
 				PassWord = PasswordHelper.Hash(password), // BCrypt 哈希，不存明文
 				RoleId = roleId,
 				RoleName = roleName,
+				Avatar = DefaultAdminAvatar,
 				IsEnabled = true,
 				StatusCode = 1,
 				StatusDesc = "启用",

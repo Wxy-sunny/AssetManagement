@@ -56,7 +56,7 @@
           <el-dropdown trigger="click" @command="handleCommand">
             <div class="user-info">
               <!-- 头像：如果有头像图片则显示图片，否则显示图标 -->
-              <el-avatar :size="36" :src="userStore.userInfo?.avatar || ''">
+              <el-avatar :size="36" :src="topAvatar" @error="onTopAvatarError">
                 <el-icon><User /></el-icon>
               </el-avatar>
               <span class="username">{{ userStore.displayName }}</span>
@@ -147,6 +147,14 @@ const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
 const themeStore = useThemeStore()
+
+// 顶栏头像：加载失败（如头像地址失效）时回退为图标
+const topAvatar = ref(userStore.userInfo?.avatar || '')
+watch(
+  () => userStore.userInfo?.avatar,
+  (v) => { topAvatar.value = v || '' },
+)
+const onTopAvatarError = () => { topAvatar.value = '' }
 
 // ============ 主题切换 ============
 const onThemeCommand = (name: ThemeName) => {

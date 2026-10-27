@@ -13,6 +13,7 @@ namespace AssetManagementSystem.Utils
 		{
 			PatchDepartment(db);
 			PatchRole(db);
+			PatchUser(db);
 		}
 
 		/// <summary>
@@ -31,6 +32,25 @@ namespace AssetManagementSystem.Utils
 			catch
 			{
 				// 列已存在或权限不足时忽略
+			}
+		}
+
+		/// <summary>
+		/// 补齐用户表新增的 avatar 列（头像地址）
+		/// </summary>
+		private static void PatchUser(ISqlSugarClient db)
+		{
+			const string table = "T_SYS_USER";
+			if (!db.DbMaintenance.IsAnyTable(table)) return;
+			if (db.DbMaintenance.IsAnyColumn(table, "avatar")) return;
+
+			try
+			{
+				db.Ado.ExecuteCommand($"ALTER TABLE {table} ADD avatar NVARCHAR(500) NULL");
+			}
+			catch
+			{
+				// 列已存在或权限不足时忽略，不影响启动
 			}
 		}
 

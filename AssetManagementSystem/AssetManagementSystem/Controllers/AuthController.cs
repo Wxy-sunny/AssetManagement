@@ -3,10 +3,13 @@ using AssetManagementSystem.Models;
 using AssetManagementSystem.Services;
 using AssetManagementSystem.Utils;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.IdentityModel.Tokens;
 using SqlSugar;
+using System.IO;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
@@ -34,19 +37,22 @@ namespace AssetManagementSystem.Controllers
 		private readonly SmsCodeService _smsCodeService;
 		private readonly AssetManagementSystem.Services.ICaptchaService _captcha;
 		private readonly AssetManagementSystem.Services.LoginGuardService _loginGuard;
+		private readonly IWebHostEnvironment _env;
 
 		public AuthController(
 			ISqlSugarClient db,
 			IConfiguration configuration,
 			SmsCodeService smsCodeService,
 			AssetManagementSystem.Services.ICaptchaService captcha,
-			AssetManagementSystem.Services.LoginGuardService loginGuard)
+			AssetManagementSystem.Services.LoginGuardService loginGuard,
+			IWebHostEnvironment env)
 		{
 			_db = db;
 			_configuration = configuration;
 			_smsCodeService = smsCodeService;
 			_captcha = captcha;
 			_loginGuard = loginGuard;
+			_env = env;
 		}
 
 		/// <summary>
@@ -377,6 +383,7 @@ namespace AssetManagementSystem.Controllers
 					deptId = user.DeptId,
 					deptName = dept?.DepartmentName,
 					lastLoginTime = user.LastLoginTime,
+					avatar = user.Avatar,
 					isAdmin = role != null && role.IsAdmin == true
 				};
 
@@ -434,15 +441,137 @@ namespace AssetManagementSystem.Controllers
 
 				// 返回最新用户信息，便于前端同步刷新本地缓存
 				return ApiResult<object>.Success(await BuildUserInfo(user), "资料更新成功");
-			}
-			catch
-			{
+				}
+				catch
+				{
 				return ApiResult<object>.Fail("500", "系统繁忙，请稍后再试");
-			}
-		}
+				}
+				}
 
-		/// <summary>
-		/// 修改当前登录用户的密码（必须校验原密码）
+				/// <summary>
+				/// 获取系统内置头像列表（返回可直接用于 &lt;img src&gt; 的相对地址 /avatars/xxx.jpg）
+				/// </summary>
+				[Authorize]
+				[HttpGet("avatars")]
+				public ApiResult<object> GetDefaultAvatars()
+				{
+				var root = _env.WebRootPath ?? Path.Combine(_env.ContentRootPath, "wwwroot");
+				var dir = Path.Combine(root, "avatars");
+				if (!Directory.Exists(dir))
+					return ApiResult<object>.Success(new List<string>(), "暂无内置头像");
+
+				var urls = Directory.EnumerateFiles(dir)
+					.Where(f => IsImageExt(Path.GetExtension(f)))
+					.OrderBy(f => f)
+					.Select(f => "/avatars/" + Path.GetFileName(f))
+					.ToList();
+				return ApiResult<object>.Success(urls, "获取成功");
+				}
+
+				/// <summary>
+				/// 设置当前登录用户的头像（系统内置头像的相对地址，或自己上传后得到的地址）
+				/// </summary>
+				[Authorize]
+				[HttpPut("avatar")]
+				public async Task<ApiResult<object>> SetAvatar([FromBody] SetAvatarDto dto)
+				{
+				try
+				{
+					var userId = CurrentUserId();
+					if (string.IsNullOrWhiteSpace(userId))
+						return ApiResult<object>.Fail("401", "登录信息无效，请重新登录");
+
+					var url = (dto?.avatar ?? "").Trim();
+					// 仅允许指向本站静态资源，避免把任意外链写入头像字段
+					if (!string.IsNullOrWhiteSpace(url)
+						&& !url.StartsWith("/avatars/", StringComparison.OrdinalIgnoreCase)
+						&& !url.StartsWith("/uploads/avatars/", StringComparison.OrdinalIgnoreCase))
+					{
+						return ApiResult<object>.Fail("400", "头像地址不合法");
+					}
+
+					var user = await _db.Queryable<SysUser>().FirstAsync(u => u.Id == userId);
+					if (user == null) return ApiResult<object>.Fail("404", "账户不存在");
+
+					user.Avatar = string.IsNullOrWhiteSpace(url) ? null : url;
+					await _db.Updateable(user).UpdateColumns(u => new { u.Avatar }).ExecuteCommandAsync();
+
+					return ApiResult<object>.Success(new { avatar = user.Avatar }, "头像已更新");
+				}
+				catch
+				{
+					return ApiResult<object>.Fail("500", "系统繁忙，请稍后再试");
+				}
+				}
+
+				/// <summary>
+				/// 上传自定义头像（图片，≤2MB），保存到 uploads/avatars 并返回相对地址，
+				/// 同时写入当前用户头像字段
+				/// </summary>
+				[Authorize]
+				[HttpPost("avatar")]
+				[RequestSizeLimit(2 * 1024 * 1024)]
+				public async Task<ApiResult<object>> UploadAvatar()
+				{
+				try
+				{
+					if (!Request.HasFormContentType)
+						return ApiResult<object>.Fail("400", "请求格式错误：上传必须使用 multipart/form-data");
+
+					var file = Request.Form.Files.FirstOrDefault();
+					if (file == null || file.Length == 0)
+						return ApiResult<object>.Fail("400", "请选择要上传的图片");
+
+					var ext = Path.GetExtension(file.FileName);
+					if (string.IsNullOrWhiteSpace(ext) || !IsImageExt(ext))
+						return ApiResult<object>.Fail("400", "仅支持 JPG/PNG/GIF/WebP 图片");
+					if (file.Length > 2 * 1024 * 1024)
+						return ApiResult<object>.Fail("400", "图片超过 2MB 上限");
+
+					var userId = CurrentUserId();
+					if (string.IsNullOrWhiteSpace(userId))
+						return ApiResult<object>.Fail("401", "登录信息无效，请重新登录");
+
+					var root = _env.WebRootPath ?? Path.Combine(_env.ContentRootPath, "wwwroot");
+					var dir = Path.Combine(root, "uploads", "avatars");
+					if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
+
+					var savedName = Guid.NewGuid().ToString("N") + ext.ToLowerInvariant();
+					var physicalPath = Path.Combine(dir, savedName);
+					await using (var stream = new FileStream(physicalPath, FileMode.Create))
+					{
+						await file.CopyToAsync(stream);
+					}
+					var relativePath = $"/uploads/avatars/{savedName}";
+
+					var user = await _db.Queryable<SysUser>().FirstAsync(u => u.Id == userId);
+					if (user == null) return ApiResult<object>.Fail("404", "账户不存在");
+					user.Avatar = relativePath;
+					await _db.Updateable(user).UpdateColumns(u => new { u.Avatar }).ExecuteCommandAsync();
+
+					return ApiResult<object>.Success(new { avatar = relativePath }, "头像上传成功");
+				}
+				catch
+				{
+					return ApiResult<object>.Fail("500", "系统繁忙，请稍后再试");
+				}
+				}
+
+				private static bool IsImageExt(string ext)
+				{
+				if (string.IsNullOrWhiteSpace(ext)) return false;
+				var e = ext.ToLowerInvariant();
+				return e == ".jpg" || e == ".jpeg" || e == ".png" || e == ".gif" || e == ".webp";
+				}
+
+				private string? CurrentUserId()
+				{
+				return User.FindFirst(ClaimTypes.NameIdentifier)?.Value
+					?? User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
+				}
+
+				/// <summary>
+				/// 修改当前登录用户的密码（必须校验原密码）
 		/// 说明：与管理员的 reset-password 不同，此接口需要用户自己输入原密码
 		/// </summary>
 		[Authorize]
@@ -526,6 +655,7 @@ namespace AssetManagementSystem.Controllers
 				user.Mobile,
 				user.RoleId,
 				user.DeptId,
+				avatar = user.Avatar,
 				isAdmin = role != null && role.IsAdmin == true,
 				permissions
 			};

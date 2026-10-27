@@ -67,5 +67,12 @@ namespace AssetManagementSystem.Models
 		/// </summary>
 		[SugarColumn(ColumnName = "last_login_time", IsNullable = true)]
 		public DateTime? LastLoginTime { get; set; }
+
+		/// <summary>
+		/// 头像地址（系统内置头像 /uploads/avatars/xxx.jpg 或用户上传 /avatars/xxx.jpg）
+		/// 为空时前端回退为姓名首字母文字头像
+		/// </summary>
+		[SugarColumn(ColumnName = "avatar", IsNullable = true, Length = 500)]
+		public string? Avatar { get; set; }
 	}
 }

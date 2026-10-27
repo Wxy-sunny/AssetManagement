@@ -3,7 +3,7 @@
     <!-- 账户概览 -->
     <el-card shadow="never" class="overview-card">
       <div class="overview">
-        <el-avatar :size="64" class="avatar">
+        <el-avatar :size="64" class="avatar" :src="showAvatar" @error="onAvatarError">
           {{ avatarText }}
         </el-avatar>
         <div class="overview-meta">
@@ -20,6 +20,41 @@
             <span>所属部门：{{ profile.deptName || '未分配' }}</span>
             <el-divider direction="vertical" />
             <span>最后登录：{{ profile.lastLoginTime || '-' }}</span>
+          </div>
+        </div>
+      </div>
+    </el-card>
+
+    <!-- 头像设置：选择系统内置头像或上传自定义头像 -->
+    <el-card shadow="never" class="avatar-card">
+      <div class="card-title">头像设置</div>
+      <div class="avatar-edit">
+        <el-avatar :size="72" :src="showAvatar" @error="onAvatarError">{{ avatarText }}</el-avatar>
+        <div class="avatar-side">
+          <div class="block">
+            <div class="block-title">选择系统头像</div>
+            <div class="avatar-grid">
+              <img
+                v-for="a in defaultAvatars"
+                :key="a"
+                :src="a"
+                :class="{ active: currentAvatar === a }"
+                @click="pickSystemAvatar(a)"
+              />
+            </div>
+          </div>
+          <div class="block">
+            <div class="block-title">上传自定义头像</div>
+            <el-upload
+              accept="image/*"
+              :show-file-list="false"
+              :before-upload="beforeUpload"
+              :http-request="doUpload"
+              :auto-upload="true"
+            >
+              <el-button :loading="uploading">选择图片</el-button>
+            </el-upload>
+            <div class="form-tip">支持 JPG/PNG/GIF/WebP，不超过 2MB</div>
           </div>
         </div>
       </div>
@@ -116,10 +151,18 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
-import { getProfile, updateProfile, changePassword, type ProfileData } from '@/api/auth'
+import {
+  getProfile,
+  updateProfile,
+  changePassword,
+  getDefaultAvatars,
+  setAvatar,
+  uploadAvatar,
+  type ProfileData,
+} from '@/api/auth'
 import { useUserStore } from '@/stores/user'
 
 const route = useRoute()
@@ -147,6 +190,68 @@ const avatarText = computed(() => {
   return name.charAt(0).toUpperCase()
 })
 
+// ============ 头像（系统内置头像 / 自定义上传） ============
+const defaultAvatars = ref<string[]>([])
+const currentAvatar = ref('')
+const uploading = ref(false)
+const avatarError = ref(false)
+// 加载失败（地址失效）时回退为文字头像
+const showAvatar = computed(() => (avatarError.value ? '' : currentAvatar.value))
+const onAvatarError = () => { avatarError.value = true }
+
+// 同步到顶栏与本地缓存，使各处头像即时统一
+const applyAvatar = (url: string | null) => {
+  currentAvatar.value = url || ''
+  avatarError.value = false
+  userStore.setUserInfo({ ...(userStore.userInfo ?? {}), avatar: url })
+}
+// 加载系统内置头像列表
+const loadDefaultAvatars = async () => {
+  try {
+    defaultAvatars.value = await getDefaultAvatars()
+  } catch {
+    defaultAvatars.value = []
+  }
+}
+// 点选系统头像
+const pickSystemAvatar = async (url: string) => {
+  try {
+    await setAvatar(url)
+    applyAvatar(url)
+    ElMessage.success('头像已更新')
+  } catch {
+    // 拦截器已提示
+  }
+}
+// 上传前校验：仅图片且 ≤2MB
+const beforeUpload = (file: File) => {
+  const okType = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'].includes(file.type)
+  if (!okType) {
+    ElMessage.error('仅支持 JPG/PNG/GIF/WebP 图片')
+    return false
+  }
+  if (file.size > 2 * 1024 * 1024) {
+    ElMessage.error('图片不能超过 2MB')
+    return false
+  }
+  return true
+}
+// 自定义上传（el-upload 自定义上传逻辑）
+const doUpload = async (req: any) => {
+  uploading.value = true
+  try {
+    const data = await uploadAvatar(req.file)
+    if (data?.avatar) {
+      applyAvatar(data.avatar)
+      ElMessage.success('头像上传成功')
+    }
+  } catch {
+    // 拦截器已提示
+  } finally {
+    uploading.value = false
+  }
+}
+
 // ============ 基本资料 ============
 const profileFormRef = ref<FormInstance>()
 const profileForm = reactive({
@@ -166,6 +271,7 @@ const loadProfile = async () => {
   loading.value = true
   try {
     profile.value = await getProfile()
+    currentAvatar.value = profile.value.avatar || ''
     profileForm.userName = profile.value.userName ?? ''
     profileForm.nickName = profile.value.nickName ?? ''
     profileForm.email = profile.value.email ?? ''
@@ -248,6 +354,7 @@ onMounted(() => {
   // 从顶栏"重置密码"进入时直接定位到密码页
   if (route.query.tab === 'password') activeTab.value = 'password'
   loadProfile()
+  loadDefaultAvatars()
 })
 </script>
 
@@ -295,5 +402,56 @@ onMounted(() => {
   color: #a8abb2;
   line-height: 1.4;
   margin-top: 4px;
+}
+.avatar-card {
+  margin-bottom: 16px;
+}
+.card-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ams-text-main);
+  margin-bottom: 16px;
+}
+.avatar-edit {
+  display: flex;
+  align-items: flex-start;
+  gap: 20px;
+}
+.avatar-edit .el-avatar {
+  flex-shrink: 0;
+  background: var(--ams-primary);
+}
+.avatar-side {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  gap: 32px;
+  flex-wrap: wrap;
+}
+.block-title {
+  font-size: 13px;
+  color: var(--ams-text-regular);
+  margin-bottom: 10px;
+}
+.avatar-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 44px);
+  gap: 8px;
+  max-width: 440px;
+}
+.avatar-grid img {
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+  cursor: pointer;
+  object-fit: cover;
+  border: 2px solid transparent;
+  transition: border-color 0.2s, transform 0.15s;
+}
+.avatar-grid img:hover {
+  transform: scale(1.08);
+}
+.avatar-grid img.active {
+  border-color: var(--ams-primary);
 }
 </style>

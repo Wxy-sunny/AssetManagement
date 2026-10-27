@@ -229,15 +229,15 @@ using (var scope = app.Services.CreateScope())
 	}
 	else
 	{
-		// 自动建表 / 结构补齐：受 DatabaseInitialization.Enabled 控制（生产环境建议关闭）
+		// 结构补齐（新增列等）必须始终执行：保证代码引用的新列存在，
+		// 不受 DatabaseInitialization:Enabled 控制（该开关仅控制是否建表 / 播种）
+		DbSchemaPatcher.Patch(dbServer.Use(DbNames.Asset));
+
+		// 自动建表：受 DatabaseInitialization.Enabled 控制（生产环境建议关闭）
 		var dbInit = configuration.GetSection("DatabaseInitialization");
-		if (dbInit.GetValue<bool>("Enabled"))
+		if (dbInit.GetValue<bool>("Enabled") && dbInit.GetValue<bool>("CreateTablesOnStartup"))
 		{
-			if (dbInit.GetValue<bool>("CreateTablesOnStartup"))
-			{
-				dbServer.CreateTablesInDb(DbNames.Asset);
-			}
-			DbSchemaPatcher.Patch(dbServer.Use(DbNames.Asset));
+			dbServer.CreateTablesInDb(DbNames.Asset);
 		}
 
 		// 初始化系统管理员账号（不存在才创建，不覆盖已有密码）

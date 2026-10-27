@@ -52,6 +52,11 @@ export default defineConfig({
         target: 'http://localhost:5099',
         changeOrigin: true,
       },
+      // 系统内置头像（后端 wwwroot/avatars）
+      '/avatars': {
+        target: 'http://localhost:5099',
+        changeOrigin: true,
+      },
     },
   },
 })

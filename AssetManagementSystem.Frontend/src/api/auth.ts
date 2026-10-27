@@ -70,6 +70,7 @@ export interface ProfileData {
   deptId?: string | null
   deptName?: string | null
   lastLoginTime?: string | null
+  avatar?: string | null
   isAdmin?: boolean
 }
 
@@ -86,6 +87,25 @@ export function updateProfile(data: {
   mobile?: string
 }): Promise<any> {
   return request.put('/auth/profile', data).then((res: any) => res?.data)
+}
+
+// 获取系统内置头像列表（返回相对地址，如 /avatars/blue01.jpg）
+export function getDefaultAvatars(): Promise<string[]> {
+  return request.get('/auth/avatars').then((res: any) => res?.data ?? [])
+}
+
+// 设置当前用户头像（系统内置地址或上传后得到的地址；传空串则清除）
+export function setAvatar(avatar: string): Promise<any> {
+  return request.put('/auth/avatar', { avatar }).then((res: any) => res?.data)
+}
+
+// 上传自定义头像（图片文件，≤2MB），返回 { avatar: 相对地址 }
+export function uploadAvatar(file: File): Promise<any> {
+  const form = new FormData()
+  form.append('file', file)
+  return request
+    .post('/auth/avatar', form, { repeatable: true } as any)
+    .then((res: any) => res?.data)
 }
 
 // 修改当前用户密码（需原密码）
