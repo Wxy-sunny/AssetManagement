@@ -1,24 +1,46 @@
 <template>
   <div :class="['login-container', 'layout-' + loginLayout]">
-    <!-- 登录框位置切换（左 / 中 / 右），选择即时生效并按用户持久化 -->
-    <!-- 注意：el-tooltip 必须包在 el-dropdown 外层（内层会破坏 dropdown 触发器识别，见 Layout.vue 主题切换器同类问题） -->
-    <el-tooltip content="登录框位置" placement="bottom">
-      <el-dropdown class="layout-switcher" trigger="click" @command="onLayoutCommand">
-        <el-icon class="layout-btn"><Setting /></el-icon>
-        <template #dropdown>
-          <el-dropdown-menu>
-            <el-dropdown-item
-              v-for="opt in LAYOUT_OPTIONS"
-              :key="opt.value"
-              :command="opt.value"
-              :disabled="opt.value === loginLayout"
-            >
-              {{ opt.label }}
-            </el-dropdown-item>
-          </el-dropdown-menu>
-        </template>
-      </el-dropdown>
-    </el-tooltip>
+    <!-- 空侧动态装饰：登录框在哪一侧，另一侧（及居中时的两侧）展示品牌动画 -->
+    <div
+      v-for="side in brandSides"
+      :key="side"
+      :class="['brand-side', 'brand-' + side]"
+      aria-hidden="true"
+    >
+      <div class="brand-inner">
+        <div class="brand-logo-wrap">
+          <span class="brand-ring r1"></span>
+          <span class="brand-ring r2"></span>
+          <img class="brand-logo" :src="logoUrl" alt="" />
+        </div>
+        <h1 class="brand-name">资产管理系统</h1>
+        <p class="brand-slogan">资产全生命周期 · 数字化管理平台</p>
+        <div class="brand-features">
+          <span class="feature-chip"><el-icon><Box /></el-icon>资产台账</span>
+          <span class="feature-chip"><el-icon><Coin /></el-icon>资产盘点</span>
+          <span class="feature-chip"><el-icon><TrendCharts /></el-icon>折旧分析</span>
+        </div>
+        <el-icon class="float-icon f1"><Box /></el-icon>
+        <el-icon class="float-icon f2"><Coin /></el-icon>
+        <el-icon class="float-icon f3"><DataLine /></el-icon>
+        <el-icon class="float-icon f4"><Files /></el-icon>
+        <el-icon class="float-icon f5"><TrendCharts /></el-icon>
+      </div>
+    </div>
+
+    <!-- 登录框位置切换（左 / 中 / 右）：滑动分段按钮，滑到哪边登录框就在哪边 -->
+    <div class="layout-switcher" role="radiogroup" aria-label="登录框位置">
+      <span class="switch-thumb" :style="{ transform: `translateX(${layoutIndex * 100}%)` }"></span>
+      <button
+        v-for="(opt, i) in LAYOUT_OPTIONS"
+        :key="opt.value"
+        type="button"
+        :class="['switch-item', { active: i === layoutIndex }]"
+        @click="onLayoutPick(opt.value)"
+      >
+        {{ opt.label }}
+      </button>
+    </div>
 
     <el-card class="login-card">
       <img class="login-logo" :src="logoUrl" alt="资产管理系统" />
@@ -369,10 +391,10 @@
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
-import { Setting } from '@element-plus/icons-vue'
+import { Box, Coin, DataLine, Files, TrendCharts } from '@element-plus/icons-vue'
 import { login, register, sendSmsCode, smsLogin, forgotPassword, getCaptcha } from '@/api/auth'
 import { submitContactRequest } from '@/api/request'
 import { getPreference, savePreference } from '@/api/preference'
@@ -405,10 +427,21 @@ const applyLayout = (v: LoginLayout) => {
   localStorage.setItem(LAYOUT_KEY, v)
 }
 
-const onLayoutCommand = (v: LoginLayout) => {
+const onLayoutPick = (v: LoginLayout) => {
+  if (v === loginLayout.value) return
   layoutTouched.value = true
   applyLayout(v)
 }
+
+// 滑块位置：左=0 / 中=1 / 右=2
+const layoutIndex = computed(() => LAYOUT_OPTIONS.findIndex((o) => o.value === loginLayout.value))
+
+// 空侧装饰展示逻辑：登录框在左侧 → 右侧展示；右侧 → 左侧展示；居中 → 两侧都展示
+const brandSides = computed<Array<'left' | 'right'>>(() => {
+  if (loginLayout.value === 'left') return ['right']
+  if (loginLayout.value === 'right') return ['left']
+  return ['left', 'right']
+})
 
 // 登录成功后同步偏好（失败不影响登录流程）
 const syncLayoutPref = async () => {
@@ -792,24 +825,174 @@ const handleContactSubmit = async () => {
   justify-content: flex-end;
   padding-right: 8vw;
 }
-/* 位置切换器：页面右上角悬浮 */
+/* 位置切换器：右上角滑动分段按钮（滑到哪边，登录框就在哪边） */
 .layout-switcher {
   position: absolute;
   top: 16px;
   right: 16px;
   z-index: 10;
+  display: flex;
+  padding: 3px;
+  background: #fff;
+  border-radius: 18px;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.1);
+  overflow: hidden;
 }
-.layout-btn {
-  font-size: 20px;
+.switch-thumb {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 3px;
+  width: calc((100% - 6px) / 3);
+  background: var(--el-color-primary, #409eff);
+  border-radius: 15px;
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.switch-item {
+  position: relative;
+  z-index: 1;
+  border: none;
+  background: transparent;
+  width: 52px;
+  padding: 6px 0;
+  font-size: 13px;
   color: #606266;
   cursor: pointer;
-  padding: 8px;
-  border-radius: 4px;
-  background: #fff;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+  transition: color 0.3s;
+  font-family: inherit;
 }
-.layout-btn:hover {
-  color: #409eff;
+.switch-item.active {
+  color: #fff;
+}
+.switch-item:not(.active):hover {
+  color: var(--el-color-primary, #409eff);
+}
+
+/* ============ 空侧品牌动画装饰 ============ */
+.brand-side {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 1;
+  pointer-events: none;
+  user-select: none;
+  animation: brand-enter 0.8s ease both;
+}
+.brand-left {
+  left: 9vw;
+}
+.brand-right {
+  right: 9vw;
+  text-align: right;
+}
+.brand-right .brand-features {
+  justify-content: flex-end;
+}
+/* 右侧装饰：漂浮图标镜像到外侧，避免压住文字 */
+.brand-right .float-icon.f1 { left: auto; right: -52px; }
+.brand-right .float-icon.f2 { left: auto; right: -70px; }
+.brand-right .float-icon.f3 { right: auto; left: -60px; }
+.brand-right .float-icon.f4 { right: auto; left: -36px; }
+.brand-inner {
+  position: relative;
+  width: 320px;
+  padding: 24px 0;
+}
+/* Logo：呼吸浮动 + 双层扩散光环 */
+.brand-logo-wrap {
+  position: relative;
+  display: inline-block;
+  margin-bottom: 18px;
+}
+.brand-logo {
+  display: block;
+  width: 96px;
+  height: 96px;
+  border-radius: 22px;
+  box-shadow: 0 12px 32px rgba(64, 158, 255, 0.28);
+  animation: logo-float 4s ease-in-out infinite;
+  position: relative;
+  z-index: 1;
+}
+.brand-right .brand-logo-wrap {
+  margin-left: auto;
+}
+.brand-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px solid rgba(64, 158, 255, 0.4);
+  animation: ring-pulse 2.6s ease-out infinite;
+}
+.brand-ring.r2 {
+  animation-delay: 1.3s;
+}
+.brand-name {
+  margin: 0 0 8px;
+  font-size: 34px;
+  font-weight: 700;
+  color: #303133;
+  letter-spacing: 2px;
+}
+.brand-slogan {
+  margin: 0 0 22px;
+  font-size: 15px;
+  color: #909399;
+  letter-spacing: 1px;
+}
+.brand-features {
+  display: flex;
+  gap: 10px;
+}
+.feature-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 14px;
+  background: #fff;
+  border-radius: 16px;
+  font-size: 13px;
+  color: #606266;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.06);
+}
+.feature-chip .el-icon {
+  color: var(--el-color-primary, #409eff);
+}
+/* 漂浮的资产符号：各自不同的轨迹 / 速度 / 透明度 */
+.float-icon {
+  position: absolute;
+  font-size: 40px;
+  color: rgba(64, 158, 255, 0.28);
+  animation: icon-float 6s ease-in-out infinite;
+}
+.float-icon.f1 { top: -46px; left: -52px; font-size: 46px; animation-duration: 7s; }
+.float-icon.f2 { bottom: 20px; left: -70px; font-size: 38px; animation-duration: 5.5s; animation-delay: 0.8s; color: rgba(103, 194, 58, 0.3); }
+.float-icon.f3 { top: 30px; right: -60px; animation-duration: 6.5s; animation-delay: 0.4s; }
+.float-icon.f4 { bottom: -40px; right: -36px; font-size: 44px; animation-duration: 8s; animation-delay: 1.2s; color: rgba(230, 162, 60, 0.32); }
+.float-icon.f5 { top: 130px; left: 40px; font-size: 30px; animation-duration: 5s; animation-delay: 1.6s; }
+
+@keyframes brand-enter {
+  from { opacity: 0; transform: translateY(calc(-50% + 24px)); }
+  to { opacity: 1; transform: translateY(-50%); }
+}
+@keyframes logo-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-10px); }
+}
+@keyframes ring-pulse {
+  0% { transform: scale(1); opacity: 0.7; }
+  100% { transform: scale(1.9); opacity: 0; }
+}
+@keyframes icon-float {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  33% { transform: translateY(-16px) rotate(6deg); }
+  66% { transform: translateY(8px) rotate(-5deg); }
+}
+/* 中等宽度：只保留居中布局，装饰退场避免拥挤 */
+@media (max-width: 1280px) {
+  .brand-side {
+    display: none;
+  }
 }
 .login-logo {
   display: block;
