@@ -55,7 +55,7 @@
 
       <!-- 登录框位置切换（左 / 中 / 右）：滑动分段按钮，滑到哪边登录框就在哪边 -->
       <div class="layout-switcher" role="radiogroup" aria-label="登录框位置">
-        <span class="switch-thumb" :style="{ transform: `translateX(${layoutIndex * 100}%)` }"></span>
+        <span class="switch-thumb" :style="{ transform: `translateX(calc((100% + 4px) * ${layoutIndex}))` }"></span>
         <button
           v-for="(opt, i) in LAYOUT_OPTIONS"
           :key="opt.value"
@@ -889,10 +889,13 @@ const handleContactSubmit = async () => {
   font-size: 12px;
   color: var(--ams-text-regular, #606266);
 }
-/* 位置切换器：滑动分段按钮（滑到哪边，登录框就在哪边） */
+/* 位置切换器：滑动分段按钮（滑到哪边，登录框就在哪边）
+ * 对齐口径说明：按钮 flex 三等分（每段 = W/3），滑块宽 = W/3 - 4px、left 2px，
+ * 每步位移 = 滑块宽 + 4px = W/3，与按钮段宽恒等，任意缩放下不会漂移 */
 .layout-switcher {
+  position: relative; /* 滑块的定位基准必须是切换器自身，而非外层控制组 */
   display: flex;
-  padding: 3px;
+  padding: 3px 0;
   background: var(--ams-card-bg, #fff);
   border-radius: 18px;
   box-shadow: 0 1px 6px rgba(0, 0, 0, 0.1);
@@ -902,10 +905,10 @@ const handleContactSubmit = async () => {
   position: absolute;
   top: 3px;
   bottom: 3px;
-  left: 3px;
-  width: calc((100% - 6px) / 3);
+  left: 2px;
+  width: calc(100% / 3 - 4px);
   background: var(--el-color-primary, #409eff);
-  border-radius: 15px;
+  border-radius: 14px;
   transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .switch-item {
@@ -913,7 +916,8 @@ const handleContactSubmit = async () => {
   z-index: 1;
   border: none;
   background: transparent;
-  width: 52px;
+  flex: 1 1 0;
+  min-width: 64px;
   padding: 6px 0;
   font-size: 13px;
   color: var(--ams-text-regular, #606266);
