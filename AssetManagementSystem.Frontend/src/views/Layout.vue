@@ -3,8 +3,8 @@
     <!-- 桌面端：左侧菜单（窄屏隐藏，改为抽屉菜单） -->
     <el-aside v-if="!isMobile" :width="collapsed ? '64px' : '200px'" class="aside">
       <div class="logo">
+        <img class="logo-icon" :src="logoUrl" alt="logo" />
         <span v-if="!collapsed">资产管理系统</span>
-        <span v-else>资</span>
       </div>
       <SideMenu :collapsed="collapsed" />
     </el-aside>
@@ -113,7 +113,10 @@
     :with-header="false"
     class="menu-drawer"
   >
-    <div class="drawer-logo">资产管理系统</div>
+    <div class="drawer-logo">
+      <img class="drawer-logo-icon" :src="logoUrl" alt="logo" />
+      <span>资产管理系统</span>
+    </div>
     <SideMenu :collapsed="false" @navigate="drawerOpen = false" />
   </el-drawer>
 </template>
@@ -138,6 +141,7 @@ import SideMenu from '@/components/SideMenu.vue'
 import { useUserStore } from '@/stores/user'
 import { useThemeStore, THEME_OPTIONS, type ThemeName } from '@/stores/theme'
 import request from '@/utils/request'
+import logoUrl from '@/assets/logo.png'
 
 const route = useRoute()
 const router = useRouter()
@@ -261,8 +265,10 @@ const handleCommand = (command: string) => {
 }
 .logo {
   height: 60px;
-  line-height: 60px;
-  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   font-size: 18px;
   font-weight: bold;
   color: #fff;
@@ -270,14 +276,27 @@ const handleCommand = (command: string) => {
   white-space: nowrap;
   overflow: hidden;
 }
+.logo-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
 .drawer-logo {
   height: 60px;
-  line-height: 60px;
-  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   font-size: 18px;
   font-weight: bold;
   color: var(--ams-primary);
   border-bottom: 1px solid var(--ams-border);
+}
+.drawer-logo-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
 }
 .header {
   display: flex;

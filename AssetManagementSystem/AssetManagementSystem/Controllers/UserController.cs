@@ -8,7 +8,9 @@ using Microsoft.AspNetCore.Mvc;
 using SqlSugar;
 using System;
 using System.Collections.Generic;
+using System.IdentityModel.Tokens.Jwt;
 using System.Linq;
+using System.Security.Claims;
 using System.Threading.Tasks;
 
 namespace AssetManagementSystem.Controllers
@@ -329,6 +331,91 @@ namespace AssetManagementSystem.Controllers
 
 			var dept = await _db.Queryable<Department>().FirstAsync(d => d.Id == deptId);
 			return dept?.DepartmentName;
+		}
+
+		// ==================== 用户个性化配置（如登录页布局） ====================
+
+		/// <summary>
+		/// 读取当前用户的某项个性化配置
+		/// 说明：不限制权限（仅 [Authorize]），用户只能读自己的配置；未设置时返回 data = null。
+		/// </summary>
+		[HttpGet("preference")]
+		public async Task<ApiResult<string?>> GetPreference([FromQuery] string? key = null)
+		{
+			var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value
+				?? User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
+			if (string.IsNullOrWhiteSpace(userId))
+				return ApiResult<string?>.Fail("401", "登录信息无效，请重新登录");
+			if (string.IsNullOrWhiteSpace(key) || key.Length > 50)
+				return ApiResult<string?>.Fail("400", "配置键不能为空且不超过 50 字符");
+
+			var pref = await _db.Queryable<UserPreference>()
+				.FirstAsync(p => p.UserId == userId && p.PrefKey == key);
+			return ApiResult<string?>.Success(pref?.PrefValue, "获取成功");
+		}
+
+		/// <summary>
+		/// 保存当前用户的某项个性化配置（upsert：存在则更新，不存在则插入）
+		/// </summary>
+		[HttpPut("preference")]
+		public async Task<ApiResult<object>> SavePreference([FromBody] UserPreferenceDto dto)
+		{
+			var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value
+				?? User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
+			if (string.IsNullOrWhiteSpace(userId))
+				return ApiResult<object>.Fail("401", "登录信息无效，请重新登录");
+			if (dto == null || string.IsNullOrWhiteSpace(dto.prefKey) || dto.prefKey.Length > 50)
+				return ApiResult<object>.Fail("400", "配置键不能为空且不超过 50 字符");
+			if (dto.prefValue == null || dto.prefValue.Length > 255)
+				return ApiResult<object>.Fail("400", "配置值不能为空且不超过 255 字符");
+
+			var now = DateTime.Now;
+			var existing = await _db.Queryable<UserPreference>()
+				.FirstAsync(p => p.UserId == userId && p.PrefKey == dto.prefKey);
+
+			if (existing != null)
+			{
+				existing.PrefValue = dto.prefValue;
+				existing.UpdateTime = now;
+				existing.UpdateUserId = userId;
+				await _db.Updateable(existing)
+					.UpdateColumns(p => new { p.PrefValue, p.UpdateTime, p.UpdateUserId })
+					.ExecuteCommandAsync();
+			}
+			else
+			{
+				var entity = new UserPreference
+				{
+					UserId = userId,
+					PrefKey = dto.prefKey,
+					PrefValue = dto.prefValue,
+					CreateUserId = userId,
+					CreateTime = now,
+					UpdateTime = now
+				};
+				try
+				{
+					await _db.Insertable(entity).ExecuteCommandAsync();
+				}
+				catch
+				{
+					// 并发首次保存可能触发 (user_id, pref_key) 唯一索引冲突：另一请求已插入，
+					// 这里改为更新，保证最终以最后一次保存为准
+					existing = await _db.Queryable<UserPreference>()
+						.FirstAsync(p => p.UserId == userId && p.PrefKey == dto.prefKey);
+					if (existing != null)
+					{
+						existing.PrefValue = dto.prefValue;
+						existing.UpdateTime = now;
+						existing.UpdateUserId = userId;
+						await _db.Updateable(existing)
+							.UpdateColumns(p => new { p.PrefValue, p.UpdateTime, p.UpdateUserId })
+							.ExecuteCommandAsync();
+					}
+				}
+			}
+
+			return ApiResult<object>.Success(null, "保存成功");
 		}
 	}
 }

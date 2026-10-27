@@ -1,6 +1,27 @@
 <template>
-  <div class="login-container">
+  <div :class="['login-container', 'layout-' + loginLayout]">
+    <!-- 登录框位置切换（左 / 中 / 右），选择即时生效并按用户持久化 -->
+    <!-- 注意：el-tooltip 必须包在 el-dropdown 外层（内层会破坏 dropdown 触发器识别，见 Layout.vue 主题切换器同类问题） -->
+    <el-tooltip content="登录框位置" placement="bottom">
+      <el-dropdown class="layout-switcher" trigger="click" @command="onLayoutCommand">
+        <el-icon class="layout-btn"><Setting /></el-icon>
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item
+              v-for="opt in LAYOUT_OPTIONS"
+              :key="opt.value"
+              :command="opt.value"
+              :disabled="opt.value === loginLayout"
+            >
+              {{ opt.label }}
+            </el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
+    </el-tooltip>
+
     <el-card class="login-card">
+      <img class="login-logo" :src="logoUrl" alt="资产管理系统" />
       <h2 class="login-title">资产管理系统</h2>
 
       <el-tabs v-model="activeTab" class="login-tabs">
@@ -351,12 +372,57 @@
 import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
+import { Setting } from '@element-plus/icons-vue'
 import { login, register, sendSmsCode, smsLogin, forgotPassword, getCaptcha } from '@/api/auth'
 import { submitContactRequest } from '@/api/request'
+import { getPreference, savePreference } from '@/api/preference'
 import { useUserStore } from '@/stores/user'
+import logoUrl from '@/assets/logo.png'
 
 const router = useRouter()
 const userStore = useUserStore()
+
+// ============ 登录框位置（左 / 中 / 右） ============
+// 匿名阶段存 localStorage（本浏览器即时生效）；登录成功后与服务端"用户配置表"同步：
+//   - 本次在登录页主动选过 → 以本次选择为准，写入配置表（跨设备跟随）
+//   - 未主动选过 → 以配置表为准（换浏览器也能恢复自己的偏好）
+type LoginLayout = 'left' | 'center' | 'right'
+const LAYOUT_KEY = 'ams:login-layout'
+const LAYOUT_OPTIONS: Array<{ value: LoginLayout; label: string }> = [
+  { value: 'left', label: '左侧' },
+  { value: 'center', label: '居中' },
+  { value: 'right', label: '右侧' },
+]
+const isLayout = (v: unknown): v is LoginLayout =>
+  v === 'left' || v === 'center' || v === 'right'
+
+const saved = localStorage.getItem(LAYOUT_KEY)
+const loginLayout = ref<LoginLayout>(isLayout(saved) ? saved : 'center')
+const layoutTouched = ref(false)
+
+const applyLayout = (v: LoginLayout) => {
+  loginLayout.value = v
+  localStorage.setItem(LAYOUT_KEY, v)
+}
+
+const onLayoutCommand = (v: LoginLayout) => {
+  layoutTouched.value = true
+  applyLayout(v)
+}
+
+// 登录成功后同步偏好（失败不影响登录流程）
+const syncLayoutPref = async () => {
+  try {
+    if (layoutTouched.value) {
+      await savePreference('login_layout', loginLayout.value)
+    } else {
+      const remote = await getPreference('login_layout')
+      if (remote && isLayout(remote)) applyLayout(remote)
+    }
+  } catch {
+    // 偏好同步失败可忽略
+  }
+}
 
 type TabName = 'password' | 'sms' | 'register'
 const activeTab = ref<TabName>('password')
@@ -536,6 +602,8 @@ const afterLogin = (res: any) => {
   if (res.refreshToken) userStore.setRefreshToken(res.refreshToken)
   userStore.setUserInfo(res.userInfo)
   ElMessage.success('登录成功')
+  // 同步登录框位置偏好到用户配置表（不阻塞跳转）
+  void syncLayoutPref()
   router.push('/dashboard')
 }
 
@@ -713,6 +781,42 @@ const handleContactSubmit = async () => {
   justify-content: center;
   align-items: center;
   background: #f0f2f5;
+  position: relative;
+}
+/* 登录框位置选项：左侧 / 居中 / 右侧 */
+.login-container.layout-left {
+  justify-content: flex-start;
+  padding-left: 8vw;
+}
+.login-container.layout-right {
+  justify-content: flex-end;
+  padding-right: 8vw;
+}
+/* 位置切换器：页面右上角悬浮 */
+.layout-switcher {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 10;
+}
+.layout-btn {
+  font-size: 20px;
+  color: #606266;
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 4px;
+  background: #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+.layout-btn:hover {
+  color: #409eff;
+}
+.login-logo {
+  display: block;
+  width: 64px;
+  height: 64px;
+  margin: 0 auto 12px;
+  border-radius: 12px;
 }
 .login-card {
   width: 420px;

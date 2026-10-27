@@ -104,6 +104,12 @@
     width: min(420px, calc(100vw - 32px)) !important;
     padding: 16px !important;
   }
+  /* 手机端登录框固定居中（左右布局在窄屏没有意义） */
+  .login-container {
+    justify-content: center !important;
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+  }
 
   /* 上传区拖拽框高度收窄 */
   .el-upload-dragger {
