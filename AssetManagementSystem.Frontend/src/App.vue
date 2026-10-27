@@ -1,5 +1,8 @@
-
 <script setup lang="ts">
+import { useThemeStore } from '@/stores/theme'
+
+// 启动时应用主题（从 localStorage 恢复），保证刷新后不丢失且避免首屏闪烁
+useThemeStore().applyTheme()
 </script>
 
 <template>

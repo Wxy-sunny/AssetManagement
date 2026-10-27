@@ -1,0 +1,129 @@
+/* ============================================================
+ * 全局响应式样式（手机端适配）
+ * 断点：≤768px 视为手机/窄屏；769~1024px 为平板微调
+ * 说明：Element Plus 部分组件宽度由内联样式/属性决定，
+ *       这里用 !important 做窄屏覆盖，仅作用于媒体查询内。
+ * ============================================================ */
+
+/* ---------- 手机端（≤768px） ---------- */
+@media (max-width: 768px) {
+  /* 页面主体内边距收窄 */
+  .el-main {
+    padding: 12px !important;
+  }
+
+  /* 卡片内边距收窄 */
+  .el-card {
+    padding: 6px 4px;
+  }
+  .el-card__body {
+    padding: 12px !important;
+  }
+
+  /* 行内表单 → 纵向堆叠，控件占满一行 */
+  .el-form--inline {
+    display: block;
+  }
+  .el-form--inline .el-form-item {
+    display: block;
+    margin-right: 0;
+    margin-bottom: 14px;
+  }
+  .el-form--inline .el-form-item .el-input,
+  .el-form--inline .el-form-item .el-select,
+  .el-form--inline .el-form-item .el-date-editor {
+    width: 100% !important;
+  }
+  .el-form--inline .el-form-item .el-button + .el-button {
+    margin-left: 0;
+    margin-top: 8px;
+  }
+
+  /* 普通（非 inline）表单标签在窄屏改为顶部对齐、占满宽度 */
+  .el-form .el-form-item {
+    margin-bottom: 16px;
+  }
+  .el-form--label-top .el-form-item__label {
+    line-height: 1.6;
+    padding: 0 0 6px;
+  }
+
+  /* 表格：允许横向滚动 + 紧凑单元格（el-table 内部滚动条生效） */
+  .el-table {
+    min-width: 720px;
+    font-size: 13px;
+  }
+  .el-table .cell {
+    padding: 0 8px;
+  }
+  .el-table .el-button {
+    padding: 4px 8px;
+    font-size: 12px;
+  }
+
+  /* 对话框 / 抽屉：占满可视宽度 */
+  .el-dialog {
+    --el-dialog-width: auto;
+    width: 92vw !important;
+    max-width: 92vw;
+    margin-top: 8vh !important;
+  }
+  .el-dialog__body {
+    padding: 12px !important;
+    max-height: 70vh;
+    overflow: auto;
+  }
+
+  /* 描述列表（详情展示）改纵向排列 */
+  .el-descriptions {
+    --el-descriptions-item-margin-bottom: 12px;
+  }
+  .el-descriptions .el-descriptions__content,
+  .el-descriptions .el-descriptions__label {
+    font-size: 13px;
+  }
+
+  /* 图表高度降低（EChart 为内联高度，!important 覆盖） */
+  .echart {
+    height: 240px !important;
+  }
+
+  /* 统计卡片间距收窄 */
+  .el-row {
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+  }
+  .el-col {
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+    margin-bottom: 12px;
+  }
+
+  /* 登录卡片宽度自适应（Login.vue 的 420px 固定宽会溢出）+ 内边距收窄 */
+  .login-card {
+    width: min(420px, calc(100vw - 32px)) !important;
+    padding: 16px !important;
+  }
+
+  /* 上传区拖拽框高度收窄 */
+  .el-upload-dragger {
+    padding: 16px !important;
+  }
+}
+
+/* ---------- 平板（769~1024px）微调 ---------- */
+@media (min-width: 769px) and (max-width: 1024px) {
+  .el-main {
+    padding: 14px;
+  }
+  .el-dialog {
+    width: 80vw !important;
+  }
+}
+
+/* ---------- 横屏手机（高度 ≤500px）---------- */
+@media (max-height: 500px) {
+  .el-dialog__body {
+    max-height: 56vh;
+  }
+}

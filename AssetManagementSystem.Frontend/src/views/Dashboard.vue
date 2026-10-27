@@ -53,9 +53,12 @@ import { Box, Money, Wallet, Calendar } from '@element-plus/icons-vue'
 import EChart from '@/components/EChart.vue'
 import { getDashboardStats } from '@/api/dashboard'
 import type { DashboardData } from '@/types'
+import { useThemeColors } from '@/composables/useThemeColors'
 
 const loading = ref(false)
 const stats = ref<DashboardData | null>(null)
+// 图表配色跟随主题（暗黑模式下坐标轴/文字自动变亮）
+const colors = useThemeColors()
 
 // 状态对应的图表配色
 const STATUS_COLOR: Record<string, string> = {
@@ -129,24 +132,41 @@ const trendOption = computed(() => {
 
   return {
     tooltip: { trigger: 'axis' },
-    legend: { data: ['新增数量', '新增金额(万)'], bottom: 0 },
+    legend: {
+      data: ['新增数量', '新增金额(万)'],
+      bottom: 0,
+      textStyle: { color: colors.value.textRegular },
+    },
     grid: { left: '3%', right: '3%', bottom: '12%', top: '8%', containLabel: true },
     xAxis: {
       type: 'category',
       data: dates,
-      axisLabel: { interval: 4, rotate: 0 },
-      axisLine: { lineStyle: { color: '#dcdfe6' } },
+      axisLabel: { interval: 4, rotate: 0, color: colors.value.textRegular },
+      axisLine: { lineStyle: { color: colors.value.border } },
     },
     yAxis: [
-      { type: 'value', name: '数量', axisLine: { show: false } },
-      { type: 'value', name: '金额(万)', axisLine: { show: false }, splitLine: { show: false } },
+      {
+        type: 'value',
+        name: '数量',
+        axisLine: { show: false },
+        axisLabel: { color: colors.value.textRegular },
+        nameTextStyle: { color: colors.value.textRegular },
+      },
+      {
+        type: 'value',
+        name: '金额(万)',
+        axisLine: { show: false },
+        splitLine: { show: false },
+        axisLabel: { color: colors.value.textRegular },
+        nameTextStyle: { color: colors.value.textRegular },
+      },
     ],
     series: [
       {
         name: '新增数量',
         type: 'bar',
         data: counts,
-        itemStyle: { color: '#409EFF', borderRadius: [3, 3, 0, 0] },
+        itemStyle: { color: colors.value.primary, borderRadius: [3, 3, 0, 0] },
         barMaxWidth: 18,
       },
       {
@@ -167,15 +187,15 @@ const statusOption = computed(() => {
   const list = stats.value?.statusStats ?? []
   return {
     tooltip: { trigger: 'item', formatter: '{b}: {c} 条 ({d}%)' },
-    legend: { bottom: 0 },
+    legend: { bottom: 0, textStyle: { color: colors.value.textRegular } },
     series: [
       {
         type: 'pie',
         radius: ['42%', '68%'],
         center: ['50%', '45%'],
         avoidLabelOverlap: true,
-        itemStyle: { borderRadius: 6, borderColor: '#fff', borderWidth: 2 },
-        label: { formatter: '{b}\n{c} 条' },
+        itemStyle: { borderRadius: 6, borderColor: colors.value.cardBg, borderWidth: 2 },
+        label: { formatter: '{b}\n{c} 条', color: colors.value.textRegular },
         data: list.map((s) => ({
           name: s.name ?? '未知',
           value: s.value ?? 0,
@@ -194,12 +214,19 @@ const categoryOption = computed(() => {
   return {
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
     grid: { left: '3%', right: '8%', bottom: '3%', top: '3%', containLabel: true },
-    xAxis: { type: 'value', name: '数量', axisLine: { show: false } },
+    xAxis: {
+      type: 'value',
+      name: '数量',
+      axisLine: { show: false },
+      axisLabel: { color: colors.value.textRegular },
+      nameTextStyle: { color: colors.value.textRegular },
+    },
     yAxis: {
       type: 'category',
       data: reversed.map((c) => c.name ?? '未分类'),
       axisLine: { show: false },
       axisTick: { show: false },
+      axisLabel: { color: colors.value.textRegular },
     },
     series: [
       {
@@ -207,10 +234,10 @@ const categoryOption = computed(() => {
         data: reversed.map((c) => c.value ?? 0),
         itemStyle: {
           borderRadius: [0, 4, 4, 0],
-          color: '#409EFF',
+          color: colors.value.primary,
         },
         barMaxWidth: 18,
-        label: { show: true, position: 'right', fontSize: 11 },
+        label: { show: true, position: 'right', fontSize: 11, color: colors.value.textRegular },
       },
     ],
   }

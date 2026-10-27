@@ -1,107 +1,12 @@
 <template>
   <el-container class="layout-container">
-    <!-- 左侧菜单（可折叠） -->
-    <el-aside :width="collapsed ? '64px' : '200px'" class="aside">
+    <!-- 桌面端：左侧菜单（窄屏隐藏，改为抽屉菜单） -->
+    <el-aside v-if="!isMobile" :width="collapsed ? '64px' : '200px'" class="aside">
       <div class="logo">
         <span v-if="!collapsed">资产管理系统</span>
         <span v-else>资</span>
       </div>
-      <el-menu
-        :default-active="$route.path"
-        :collapse="collapsed"
-        :collapse-transition="false"
-        router
-        class="menu"
-        background-color="#001529"
-        text-color="#fff"
-        active-text-color="#409EFF"
-      >
-        <el-menu-item v-if="menuPerm.dashboard" index="/dashboard">
-          <el-icon><HomeFilled /></el-icon>
-          <template #title>首页</template>
-        </el-menu-item>
-
-        <el-sub-menu v-if="menuPerm.assets || menuPerm.categories" index="info">
-          <template #title>
-            <el-icon><Box /></el-icon>
-            <span>信息管理</span>
-          </template>
-          <el-menu-item v-if="menuPerm.assets" index="/assets">
-            <el-icon><Goods /></el-icon>
-            <template #title>资产列表</template>
-          </el-menu-item>
-          <el-menu-item v-if="menuPerm.categories" index="/categories">
-            <el-icon><Grid /></el-icon>
-            <template #title>资产分类</template>
-          </el-menu-item>
-        </el-sub-menu>
-
-        <el-menu-item v-if="menuPerm.files" index="/files">
-          <el-icon><Folder /></el-icon>
-          <template #title>资料管理</template>
-        </el-menu-item>
-
-        <el-sub-menu index="notice">
-          <template #title>
-            <el-icon><Bell /></el-icon>
-            <span>通知公告</span>
-          </template>
-          <el-menu-item index="/notifications">
-            <el-icon><ChatDotRound /></el-icon>
-            <template #title>系统通知</template>
-          </el-menu-item>
-          <el-menu-item index="/messages">
-            <el-icon><Message /></el-icon>
-            <template #title>
-              我的消息
-              <el-badge
-                v-if="msgUnreadCount > 0"
-                :value="msgUnreadCount"
-                :max="99"
-                class="menu-badge"
-              />
-            </template>
-          </el-menu-item>
-          <el-menu-item v-if="menuPerm.notifications" index="/system/notifications">
-            <el-icon><EditPen /></el-icon>
-            <template #title>通知管理</template>
-          </el-menu-item>
-        </el-sub-menu>
-
-        <el-sub-menu
-          v-if="menuPerm.users || menuPerm.roles || menuPerm.depts"
-          index="system"
-        >
-          <template #title>
-            <el-icon><Setting /></el-icon>
-            <span>权限管理</span>
-          </template>
-          <el-menu-item v-if="menuPerm.users" index="/system/users">
-            <el-icon><User /></el-icon>
-            <template #title>用户管理</template>
-          </el-menu-item>
-          <el-menu-item v-if="menuPerm.roles" index="/system/roles">
-            <el-icon><Avatar /></el-icon>
-            <template #title>角色管理</template>
-          </el-menu-item>
-          <el-menu-item v-if="menuPerm.depts" index="/system/departments">
-            <el-icon><OfficeBuilding /></el-icon>
-            <template #title>部门管理</template>
-          </el-menu-item>
-          <el-menu-item v-if="menuPerm.requests" index="/system/requests">
-            <el-icon><ChatLineSquare /></el-icon>
-            <template #title>
-              联系请求
-              <el-badge
-                v-if="pendingCount > 0"
-                :value="pendingCount"
-                :max="99"
-                class="menu-badge"
-              />
-            </template>
-          </el-menu-item>
-        </el-sub-menu>
-      </el-menu>
+      <SideMenu :collapsed="collapsed" />
     </el-aside>
 
     <!-- 右侧主体 -->
@@ -109,8 +14,14 @@
       <!-- 顶部导航 -->
       <el-header class="header">
         <div class="header-left">
-          <!-- 折叠 / 展开侧边栏 -->
-          <el-tooltip :content="collapsed ? '展开菜单' : '收起菜单'" placement="bottom">
+          <!-- 移动端：汉堡菜单（打开抽屉） -->
+          <el-tooltip v-if="isMobile" content="打开菜单" placement="bottom">
+            <el-icon class="collapse-btn" @click="drawerOpen = true">
+              <Menu />
+            </el-icon>
+          </el-tooltip>
+          <!-- 桌面端：折叠 / 展开侧边栏 -->
+          <el-tooltip v-else :content="collapsed ? '展开菜单' : '收起菜单'" placement="bottom">
             <el-icon class="collapse-btn" @click="collapsed = !collapsed">
               <Expand v-if="collapsed" />
               <Fold v-else />
@@ -118,6 +29,29 @@
           </el-tooltip>
         </div>
         <div class="header-right">
+          <!-- 主题切换（tooltip 包在 dropdown 外层，避免干扰其触发器） -->
+          <el-tooltip :content="'当前主题：' + themeStore.currentOption.label" placement="bottom">
+            <el-dropdown trigger="click" @command="onThemeCommand">
+              <el-icon class="header-btn">
+                <Moon v-if="themeStore.theme === 'dark'" />
+                <Sunny v-else />
+              </el-icon>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item
+                    v-for="t in THEME_OPTIONS"
+                    :key="t.name"
+                    :command="t.name"
+                    :disabled="t.name === themeStore.theme"
+                  >
+                    <span class="theme-label">{{ t.label }}</span>
+                    <span class="theme-tip">{{ t.tip }}</span>
+                  </el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
+          </el-tooltip>
+
           <!-- 用户下拉菜单 -->
           <el-dropdown trigger="click" @command="handleCommand">
             <div class="user-info">
@@ -125,7 +59,7 @@
               <el-avatar :size="36" :src="userStore.userInfo?.avatar || ''">
                 <el-icon><User /></el-icon>
               </el-avatar>
-              <span class="username">{{ userStore.displayName}}</span>
+              <span class="username">{{ userStore.displayName }}</span>
               <el-icon class="arrow"><ArrowDown /></el-icon>
             </div>
             <template #dropdown>
@@ -148,7 +82,7 @@
         </div>
       </el-header>
 
-      <!-- 页签导航（访问过的页面，可切换 / 关闭） -->
+      <!-- 页签导航（访问过的页面，可切换 / 关闭；窄屏横向滚动） -->
       <div class="tags-bar">
         <el-tag
           v-for="tag in visitedTags"
@@ -170,44 +104,66 @@
       </el-main>
     </el-container>
   </el-container>
+
+  <!-- 移动端：抽屉菜单（从左侧滑出） -->
+  <el-drawer
+    v-model="drawerOpen"
+    direction="ltr"
+    size="220px"
+    :with-header="false"
+    class="menu-drawer"
+  >
+    <div class="drawer-logo">资产管理系统</div>
+    <SideMenu :collapsed="false" @navigate="drawerOpen = false" />
+  </el-drawer>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter, type RouteLocationNormalizedLoaded } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  HomeFilled,
-  Box,
-  Grid,
-  Goods,
-  Folder,
-  Setting,
   User,
-  Avatar,
-  OfficeBuilding,
   Bell,
-  ChatDotRound,
-  EditPen,
-  Message,
   Lock,
   SwitchButton,
-  ChatLineSquare,
   ArrowDown,
   Fold,
   Expand,
+  Menu,
+  Sunny,
+  Moon,
 } from '@element-plus/icons-vue'
+import SideMenu from '@/components/SideMenu.vue'
 import { useUserStore } from '@/stores/user'
-import { PERMISSIONS } from '@/types'
-import { getRequestPendingCount } from '@/api/request'
-import { getUnreadCount } from '@/api/message'
+import { useThemeStore, THEME_OPTIONS, type ThemeName } from '@/stores/theme'
 import request from '@/utils/request'
 
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
+const themeStore = useThemeStore()
 
-// ============ 侧边栏折叠 ============
+// ============ 主题切换 ============
+const onThemeCommand = (name: ThemeName) => {
+  themeStore.applyTheme(name)
+}
+
+// ============ 移动端适配 ============
+// ≤768px 视为手机：侧边栏改为抽屉菜单
+const mobileQuery = window.matchMedia('(max-width: 768px)')
+const isMobile = ref(mobileQuery.matches)
+const drawerOpen = ref(false)
+
+const onMobileChange = (e: MediaQueryListEvent) => {
+  isMobile.value = e.matches
+  // 回到桌面宽度时自动关闭抽屉，避免状态残留
+  if (!e.matches) drawerOpen.value = false
+}
+mobileQuery.addEventListener('change', onMobileChange)
+onBeforeUnmount(() => mobileQuery.removeEventListener('change', onMobileChange))
+
+// ============ 侧边栏折叠（桌面端） ============
 const collapsed = ref(false)
 
 // ============ 页签导航 ============
@@ -228,14 +184,10 @@ const addTag = (r: RouteLocationNormalizedLoaded) => {
   }
 }
 
-// 路由变化时自动追加页签，进入联系请求页时刷新待处理角标，进入我的消息页时刷新未读数
+// 路由变化时自动追加页签
 watch(
   () => route.path,
-  (p) => {
-    addTag(route)
-    if (p === '/system/requests') loadPendingCount()
-    if (p === '/messages') loadMsgUnreadCount()
-  },
+  () => addTag(route),
   { immediate: true },
 )
 
@@ -256,45 +208,6 @@ const handleCloseTag = (tag: TagView) => {
     if (next) router.push(next.path)
   }
 }
-
-// 菜单可见性：根据当前用户权限动态控制
-const menuPerm = computed(() => ({
-  dashboard: userStore.hasPermission(PERMISSIONS.DashboardView),
-  assets: userStore.hasPermission(PERMISSIONS.AssetList),
-  categories: userStore.hasPermission(PERMISSIONS.CategoryList),
-  files: userStore.hasPermission(PERMISSIONS.FileList),
-  users: userStore.hasPermission(PERMISSIONS.UserList),
-  roles: userStore.hasPermission(PERMISSIONS.RoleList),
-  depts: userStore.hasPermission(PERMISSIONS.DeptList),
-  notifications: userStore.hasPermission(PERMISSIONS.NotificationList),
-  requests: userStore.hasPermission(PERMISSIONS.RequestList),
-}))
-
-// 联系请求待处理数量（菜单角标）
-const pendingCount = ref(0)
-const loadPendingCount = async () => {
-  if (!userStore.hasPermission(PERMISSIONS.RequestList)) return
-  try {
-    pendingCount.value = await getRequestPendingCount()
-  } catch {
-    pendingCount.value = 0
-  }
-}
-
-// 个人消息未读数量（菜单角标，登录即可，无权限门槛）
-const msgUnreadCount = ref(0)
-const loadMsgUnreadCount = async () => {
-  try {
-    msgUnreadCount.value = await getUnreadCount()
-  } catch {
-    msgUnreadCount.value = 0
-  }
-}
-
-onMounted(() => {
-  loadPendingCount()
-  loadMsgUnreadCount()
-})
 
 // 处理下拉菜单命令
 const handleCommand = (command: string) => {
@@ -341,8 +254,8 @@ const handleCommand = (command: string) => {
   height: 100vh;
 }
 .aside {
-  background-color: #001529;
-  color: #fff;
+  background-color: var(--ams-sidebar-bg);
+  color: var(--ams-sidebar-text);
   transition: width 0.25s;
   overflow-x: hidden;
 }
@@ -353,19 +266,26 @@ const handleCommand = (command: string) => {
   font-size: 18px;
   font-weight: bold;
   color: #fff;
-  border-bottom: 1px solid #0a1f3a;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   white-space: nowrap;
   overflow: hidden;
 }
-.menu {
-  border-right: none;
+.drawer-logo {
+  height: 60px;
+  line-height: 60px;
+  text-align: center;
+  font-size: 18px;
+  font-weight: bold;
+  color: var(--ams-primary);
+  border-bottom: 1px solid var(--ams-border);
 }
 .header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: #fff;
-  border-bottom: 1px solid #e6e6e6;
+  background: var(--ams-header-bg);
+  color: var(--ams-header-text);
+  border-bottom: 1px solid var(--ams-tagsbar-border);
   padding: 0 20px;
 }
 .header-left {
@@ -374,15 +294,34 @@ const handleCommand = (command: string) => {
 }
 .collapse-btn {
   font-size: 20px;
-  color: #303133;
+  color: var(--ams-header-text);
   cursor: pointer;
 }
 .collapse-btn:hover {
-  color: #409eff;
+  color: var(--ams-primary);
 }
 .header-right {
   display: flex;
   align-items: center;
+  gap: 4px;
+}
+.header-btn {
+  font-size: 18px;
+  color: var(--ams-header-text);
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 4px;
+}
+.header-btn:hover {
+  color: var(--ams-primary);
+  background: var(--ams-hover-bg);
+}
+.theme-label {
+  margin-right: 8px;
+}
+.theme-tip {
+  font-size: 12px;
+  color: var(--ams-text-regular);
 }
 .user-info {
   display: flex;
@@ -393,16 +332,16 @@ const handleCommand = (command: string) => {
   transition: background 0.2s;
 }
 .user-info:hover {
-  background: #f0f2f5;
+  background: var(--ams-hover-bg);
 }
 .username {
   margin: 0 8px;
   font-size: 14px;
-  color: #333;
+  color: var(--ams-text-main);
 }
 .arrow {
   font-size: 12px;
-  color: #999;
+  color: var(--ams-text-regular);
 }
 /* 页签导航栏 */
 .tags-bar {
@@ -410,22 +349,50 @@ const handleCommand = (command: string) => {
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
-  background: #fff;
-  border-bottom: 1px solid #e6e6e6;
+  background: var(--ams-tagsbar-bg);
+  border-bottom: 1px solid var(--ams-tagsbar-border);
   padding: 8px 16px;
 }
 .tag-item {
   cursor: pointer;
 }
 .tag-active {
-  border-color: #409eff;
-  color: #409eff;
-}
-.menu-badge {
-  margin-left: 6px;
+  border-color: var(--ams-primary);
+  color: var(--ams-primary);
 }
 .main {
-  background: #f0f2f5;
+  background: var(--ams-body-bg);
   padding: 20px;
+}
+
+/* 抽屉内的菜单撑满高度 */
+.menu-drawer :deep(.el-drawer__body) {
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---------- 手机端（≤768px）---------- */
+@media (max-width: 768px) {
+  /* 隐藏用户名文字，只留头像，节省头部空间 */
+  .username {
+    display: none;
+  }
+  .header {
+    padding: 0 12px;
+  }
+  /* 页签栏改为横向滚动（不换行），并隐藏滚动条 */
+  .tags-bar {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding: 8px 12px;
+    scrollbar-width: none;
+  }
+  .tags-bar::-webkit-scrollbar {
+    display: none;
+  }
+  .tag-item {
+    flex-shrink: 0;
+  }
 }
 </style>

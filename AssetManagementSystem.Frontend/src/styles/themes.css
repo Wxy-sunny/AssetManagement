@@ -1,0 +1,158 @@
+/* ============================================================
+ * 主题变量体系
+ * 切换方式：<html data-theme="light|dark|green|purple">（由 theme store 设置）
+ * 1) --el-color-primary 系列：覆盖 Element Plus 主色（按钮/链接/高亮统一变色）
+ * 2) --ams-*：框架自有变量（侧边栏、页面背景、文字、边框等）
+ * 暗黑模式额外依赖 Element Plus 的 dark/css-vars.css + html.dark 类
+ * ============================================================ */
+
+/* ---------- 默认蓝（浅色） ---------- */
+:root,
+html[data-theme='light'] {
+  --el-color-primary: #409eff;
+  --el-color-primary-light-3: #6cb2ff;
+  --el-color-primary-light-5: #a0d0ff;
+  --el-color-primary-light-7: #c6e2ff;
+  --el-color-primary-light-8: #d9ecff;
+  --el-color-primary-light-9: #ecf5ff;
+  --el-color-primary-dark-2: #337ecc;
+
+  --ams-primary: #409eff;
+  --ams-sidebar-bg: #001529;
+  --ams-sidebar-text: #ffffff;
+  --ams-header-bg: #ffffff;
+  --ams-header-text: #303133;
+  --ams-body-bg: #f0f2f5;
+  --ams-card-bg: #ffffff;
+  --ams-text-main: #303133;
+  --ams-text-regular: #606266;
+  --ams-border: #ebeef5;
+  --ams-hover-bg: #f0f2f5;
+  --ams-tagsbar-bg: #ffffff;
+  --ams-tagsbar-border: #e6e6e6;
+}
+
+/* ---------- 暗黑模式 ----------
+ * 注意：--el-* 主色系列不在此覆盖——Element Plus 的 dark/css-vars.css 已提供
+ * 针对暗色背景调好的主色梯度（html.dark 选择器），此处只定义框架自有变量，
+ * 避免用浅色梯度覆盖后破坏按钮悬停等暗色配色。
+ */
+html[data-theme='dark'] {
+  --ams-primary: #409eff;
+  --ams-sidebar-bg: #0d1117;
+  --ams-sidebar-text: #e5eaf3;
+  --ams-header-bg: #161b22;
+  --ams-header-text: #e5eaf3;
+  --ams-body-bg: #010409;
+  --ams-card-bg: #161b22;
+  --ams-text-main: #e5eaf3;
+  --ams-text-regular: #8b949e;
+  --ams-border: #30363d;
+  --ams-hover-bg: #21262d;
+  --ams-tagsbar-bg: #161b22;
+  --ams-tagsbar-border: #30363d;
+}
+
+/* ---------- 清新绿 ---------- */
+html[data-theme='green'] {
+  --el-color-primary: #16a34a;
+  --el-color-primary-light-3: #4eb878;
+  --el-color-primary-light-5: #86d0a5;
+  --el-color-primary-light-7: #bde5cd;
+  --el-color-primary-light-8: #d4f0e0;
+  --el-color-primary-light-9: #eaf7ef;
+  --el-color-primary-dark-2: #12833b;
+
+  --ams-primary: #16a34a;
+  --ams-sidebar-bg: #0b2e1a;
+  --ams-sidebar-text: #ffffff;
+  --ams-header-bg: #ffffff;
+  --ams-header-text: #303133;
+  --ams-body-bg: #f0f7f2;
+  --ams-card-bg: #ffffff;
+  --ams-text-main: #303133;
+  --ams-text-regular: #606266;
+  --ams-border: #ebeef5;
+  --ams-hover-bg: #eaf7ef;
+  --ams-tagsbar-bg: #ffffff;
+  --ams-tagsbar-border: #e6e6e6;
+}
+
+/* ---------- 优雅紫 ---------- */
+html[data-theme='purple'] {
+  --el-color-primary: #7c3aed;
+  --el-color-primary-light-3: #9a66f3;
+  --el-color-primary-light-5: #b794f6;
+  --el-color-primary-light-7: #d6c2fa;
+  --el-color-primary-light-8: #e4d8fd;
+  --el-color-primary-light-9: #f2ecfe;
+  --el-color-primary-dark-2: #632fbe;
+
+  --ams-primary: #7c3aed;
+  --ams-sidebar-bg: #1e1b3a;
+  --ams-sidebar-text: #ffffff;
+  --ams-header-bg: #ffffff;
+  --ams-header-text: #303133;
+  --ams-body-bg: #f5f3fb;
+  --ams-card-bg: #ffffff;
+  --ams-text-main: #303133;
+  --ams-text-regular: #606266;
+  --ams-border: #ebeef5;
+  --ams-hover-bg: #f2ecfe;
+  --ams-tagsbar-bg: #ffffff;
+  --ams-tagsbar-border: #e6e6e6;
+}
+
+/* 暗黑模式下页面基础色（卡片/文字/边框跟随主题变量） */
+html[data-theme='dark'] body {
+  background-color: var(--ams-body-bg);
+  color: var(--ams-text-main);
+}
+
+/* Element Plus 暗黑模式：由 main.ts 引入 dark/css-vars.css，
+   此处补充 el-card / el-dialog 等容器背景，保证内容区也是暗色 */
+html.dark .el-card,
+html.dark .el-dialog,
+html.dark .el-drawer,
+html.dark .el-message-box,
+html.dark .el-dropdown-menu,
+html.dark .el-table,
+html.dark .el-table__expanded-cell,
+html.dark .el-input__inner,
+html.dark .el-textarea__inner,
+html.dark .el-select__wrapper,
+html.dark .el-picker__editor {
+  background-color: var(--ams-card-bg);
+  color: var(--ams-text-main);
+}
+
+html.dark .el-table th.el-table__cell,
+html.dark .el-table tr {
+  background-color: var(--ams-card-bg);
+}
+
+html.dark .el-table--striped .el-table__body tr.el-table__row--striped td.el-table__cell {
+  background-color: #1c2128;
+}
+
+html.dark .el-table td.el-table__cell,
+html.dark .el-table th.el-table__cell {
+  border-bottom-color: var(--ams-border);
+}
+
+html.dark .el-input__inner::placeholder,
+html.dark .el-textarea__inner::placeholder {
+  color: #6e7681;
+}
+
+/* 主题切换过渡（避免生硬跳变） */
+body,
+.el-card,
+.el-menu,
+.el-header,
+.el-aside,
+.el-main,
+.el-tag,
+.el-button {
+  transition: background-color 0.25s ease, color 0.25s ease, border-color 0.25s ease;
+}
