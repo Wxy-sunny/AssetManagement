@@ -28,18 +28,44 @@
       </div>
     </div>
 
-    <!-- 登录框位置切换（左 / 中 / 右）：滑动分段按钮，滑到哪边登录框就在哪边 -->
-    <div class="layout-switcher" role="radiogroup" aria-label="登录框位置">
-      <span class="switch-thumb" :style="{ transform: `translateX(${layoutIndex * 100}%)` }"></span>
-      <button
-        v-for="(opt, i) in LAYOUT_OPTIONS"
-        :key="opt.value"
-        type="button"
-        :class="['switch-item', { active: i === layoutIndex }]"
-        @click="onLayoutPick(opt.value)"
-      >
-        {{ opt.label }}
-      </button>
+    <!-- 右上角控制组：主题切换 + 登录框位置切换 -->
+    <div class="top-controls">
+      <!-- 主题切换（与 Layout 同款：tooltip 包在 dropdown 外层，避免干扰其触发器） -->
+      <el-tooltip :content="'当前主题：' + themeStore.currentOption.label" placement="bottom">
+        <el-dropdown trigger="click" @command="onThemeCommand">
+          <el-icon class="theme-btn">
+            <Moon v-if="themeStore.theme === 'dark'" />
+            <Sunny v-else />
+          </el-icon>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item
+                v-for="t in THEME_OPTIONS"
+                :key="t.name"
+                :command="t.name"
+                :disabled="t.name === themeStore.theme"
+              >
+                <span class="theme-label">{{ t.label }}</span>
+                <span class="theme-tip">{{ t.tip }}</span>
+              </el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
+      </el-tooltip>
+
+      <!-- 登录框位置切换（左 / 中 / 右）：滑动分段按钮，滑到哪边登录框就在哪边 -->
+      <div class="layout-switcher" role="radiogroup" aria-label="登录框位置">
+        <span class="switch-thumb" :style="{ transform: `translateX(${layoutIndex * 100}%)` }"></span>
+        <button
+          v-for="(opt, i) in LAYOUT_OPTIONS"
+          :key="opt.value"
+          type="button"
+          :class="['switch-item', { active: i === layoutIndex }]"
+          @click="onLayoutPick(opt.value)"
+        >
+          {{ opt.label }}
+        </button>
+      </div>
     </div>
 
     <el-card class="login-card">
@@ -394,15 +420,22 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
-import { Box, Coin, DataLine, Files, TrendCharts } from '@element-plus/icons-vue'
+import { Box, Coin, DataLine, Files, TrendCharts, Sunny, Moon } from '@element-plus/icons-vue'
 import { login, register, sendSmsCode, smsLogin, forgotPassword, getCaptcha } from '@/api/auth'
 import { submitContactRequest } from '@/api/request'
 import { getPreference, savePreference } from '@/api/preference'
 import { useUserStore } from '@/stores/user'
+import { useThemeStore, THEME_OPTIONS, type ThemeName } from '@/stores/theme'
 import logoUrl from '@/assets/logo.png'
 
 const router = useRouter()
 const userStore = useUserStore()
+const themeStore = useThemeStore()
+
+// ============ 主题切换（与 Layout 同一套 store，选择即时生效并持久化） ============
+const onThemeCommand = (name: ThemeName) => {
+  themeStore.applyTheme(name)
+}
 
 // ============ 登录框位置（左 / 中 / 右） ============
 // 匿名阶段存 localStorage（本浏览器即时生效）；登录成功后与服务端"用户配置表"同步：
@@ -813,7 +846,7 @@ const handleContactSubmit = async () => {
   display: flex;
   justify-content: center;
   align-items: center;
-  background: #f0f2f5;
+  background: var(--ams-body-bg, #f0f2f5);
   position: relative;
 }
 /* 登录框位置选项：左侧 / 居中 / 右侧 */
@@ -825,15 +858,42 @@ const handleContactSubmit = async () => {
   justify-content: flex-end;
   padding-right: 8vw;
 }
-/* 位置切换器：右上角滑动分段按钮（滑到哪边，登录框就在哪边） */
-.layout-switcher {
+/* 右上角控制组：主题切换 + 登录框位置切换 */
+.top-controls {
   position: absolute;
   top: 16px;
   right: 16px;
   z-index: 10;
   display: flex;
+  align-items: center;
+  gap: 8px;
+}
+/* 主题切换按钮 */
+.theme-btn {
+  font-size: 20px;
+  color: var(--ams-text-regular, #606266);
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 50%;
+  background: var(--ams-card-bg, #fff);
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.1);
+  transition: color 0.25s;
+}
+.theme-btn:hover {
+  color: var(--el-color-primary, #409eff);
+}
+.theme-label {
+  margin-right: 8px;
+}
+.theme-tip {
+  font-size: 12px;
+  color: var(--ams-text-regular, #606266);
+}
+/* 位置切换器：滑动分段按钮（滑到哪边，登录框就在哪边） */
+.layout-switcher {
+  display: flex;
   padding: 3px;
-  background: #fff;
+  background: var(--ams-card-bg, #fff);
   border-radius: 18px;
   box-shadow: 0 1px 6px rgba(0, 0, 0, 0.1);
   overflow: hidden;
@@ -856,7 +916,7 @@ const handleContactSubmit = async () => {
   width: 52px;
   padding: 6px 0;
   font-size: 13px;
-  color: #606266;
+  color: var(--ams-text-regular, #606266);
   cursor: pointer;
   transition: color 0.3s;
   font-family: inherit;
@@ -931,13 +991,13 @@ const handleContactSubmit = async () => {
   margin: 0 0 8px;
   font-size: 34px;
   font-weight: 700;
-  color: #303133;
+  color: var(--ams-text-main, #303133);
   letter-spacing: 2px;
 }
 .brand-slogan {
   margin: 0 0 22px;
   font-size: 15px;
-  color: #909399;
+  color: var(--ams-text-regular, #909399);
   letter-spacing: 1px;
 }
 .brand-features {
@@ -949,10 +1009,10 @@ const handleContactSubmit = async () => {
   align-items: center;
   gap: 5px;
   padding: 6px 14px;
-  background: #fff;
+  background: var(--ams-card-bg, #fff);
   border-radius: 16px;
   font-size: 13px;
-  color: #606266;
+  color: var(--ams-text-regular, #606266);
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.06);
 }
 .feature-chip .el-icon {
@@ -1008,7 +1068,7 @@ const handleContactSubmit = async () => {
 .login-title {
   text-align: center;
   margin-bottom: 20px;
-  color: #303133;
+  color: var(--ams-text-main, #303133);
 }
 .login-btn {
   width: 100%;
@@ -1030,7 +1090,7 @@ const handleContactSubmit = async () => {
   width: 120px;
   height: 40px;
   border-radius: 4px;
-  border: 1px solid #dcdfe6;
+  border: 1px solid var(--ams-border, #dcdfe6);
   cursor: pointer;
 }
 .extra-row {
