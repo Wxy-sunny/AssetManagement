@@ -958,6 +958,21 @@ const handleContactSubmit = async () => {
   width: 320px;
   padding: 24px 0;
 }
+/* 居中布局：两侧只保留漂浮的动态符号，不展示品牌文案区 */
+.layout-center .brand-logo-wrap,
+.layout-center .brand-name,
+.layout-center .brand-slogan,
+.layout-center .brand-features {
+  display: none;
+}
+/* 文案隐藏后符号失去锚点，给容器一个较高的隐形框让符号纵向铺开 */
+.layout-center .brand-inner {
+  width: 26vw;
+  max-width: 420px;
+  height: 72vh;
+  max-height: 640px;
+  padding: 0;
+}
 /* Logo：呼吸浮动 + 双层扩散光环 */
 .brand-logo-wrap {
   position: relative;
