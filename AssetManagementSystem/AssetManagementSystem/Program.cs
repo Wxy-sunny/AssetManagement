@@ -2,9 +2,15 @@ using AssetManagementSystem.Extensions;
 using AssetManagementSystem.Models;
 using AssetManagementSystem.Services;
 using AssetManagementSystem.Utils;
+using AssetManagementSystem.Middlewares;
 using System.Xml.Linq;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.AspNetCore.Server.Kestrel.Core;
+using System.Threading.RateLimiting;
 using Microsoft.IdentityModel.Tokens;
+using System.Net;
 using System.Text;
 using System.Security.Cryptography;
 using StackExchange.Redis;
@@ -12,6 +18,9 @@ using Serilog;
 
 
 var builder = WebApplication.CreateBuilder(args);
+
+// 生产环境不回显 Kestrel 的 Server 头，减少技术栈暴露
+builder.Services.Configure<KestrelServerOptions>(o => o.AddServerHeader = false);
 
 // ============ 日志：Serilog（控制台 + 文件双写） ============
 // 文件日志：logs/asset-api-YYYYMMDD.log 按天滚动，单文件 50MB 上限、最多保留 31 天。
@@ -90,11 +99,21 @@ builder.Services.AddCors(options =>
 });
 
 // 注入JWT
-// JWT 签名密钥：配置为空时生成一次性随机密钥（仅适合本地开发，重启后旧 token 失效）
+// JWT 签名密钥：
+//  - 生产环境（ASPNETCORE_ENVIRONMENT=Production）必须显式配置 Jwt__SecretKey（≥32 字节），
+//    否则启动即失败（Fail-Fast），避免"每次重启旧 token 全失效 / 多实例互不相认"的隐蔽故障。
+//  - 非生产环境：密钥缺失时自动生成一次性随机密钥，方便本地联调（仅当前进程有效）。
 var jwtSecret = builder.Configuration["Jwt:SecretKey"];
 var jwtSecretGenerated = false;
+var isProd = builder.Environment.IsProduction();
 if (string.IsNullOrWhiteSpace(jwtSecret))
 {
+	if (isProd)
+	{
+		Log.Fatal("生产环境检测到 Jwt:SecretKey 未配置。请通过环境变量 Jwt__SecretKey 设置一个稳定且≥32字节的密钥后再启动。");
+		throw new InvalidOperationException("生产环境必须配置 Jwt__SecretKey（≥32字节）");
+	}
+
 	jwtSecret = Convert.ToBase64String(RandomNumberGenerator.GetBytes(48));
 	jwtSecretGenerated = true;
 	// 关键修复：把生成的密钥回写到配置，保证 AuthController 签发 Token 时
@@ -124,9 +143,72 @@ builder.Services.AddAuthentication(options =>
 	};
 });
 
+// ============ 速率限制（防滥用：短信轰炸 / 批量注册 / 重置密码 / 联系请求刷单） ============
+// 限流键优先取真实客户端 IP（X-Forwarded-For 首段，兼容反向代理；与 LoginGuard 取 IP 逻辑一致）。
+// 注意：经反向代理部署时若未正确配置 ForwardedHeaders，X-Forwarded-For 可被客户端伪造，
+// 因此限流为"尽力而为"的滥用防护而非强认证手段。
+builder.Services.AddRateLimiter(options =>
+{
+	options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+	options.OnRejected = async (ctx, ct) =>
+	{
+		ctx.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+		ctx.HttpContext.Response.ContentType = "application/json; charset=utf-8";
+		await ctx.HttpContext.Response.WriteAsJsonAsync(
+			new { code = "429", message = "请求过于频繁，请稍后再试", data = (object?)null }, ct);
+	};
+
+	// 短信发送：代价高、易被轰炸，限流最严（同一 IP 10 分钟 5 次）
+	options.AddPolicy("sms", ctx =>
+		RateLimitPartition.GetFixedWindowLimiter(
+			"sms:" + (LoginGuardService.GetClientIp(ctx) ?? "unknown"),
+			_ => new FixedWindowRateLimiterOptions
+			{
+				PermitLimit = 5,
+				Window = TimeSpan.FromMinutes(10),
+				QueueLimit = 0,
+			}));
+
+	// 公开表单类接口（注册 / 找回密码 / 联系请求）：同一 IP 10 分钟 10 次
+	options.AddPolicy("public-form", ctx =>
+		RateLimitPartition.GetFixedWindowLimiter(
+			"pf:" + (LoginGuardService.GetClientIp(ctx) ?? "unknown"),
+			_ => new FixedWindowRateLimiterOptions
+			{
+				PermitLimit = 10,
+				Window = TimeSpan.FromMinutes(10),
+				QueueLimit = 0,
+			}));
+});
+
 
 
 var app = builder.Build();
+
+// ============ 反向代理头（X-Forwarded-For / X-Forwarded-Proto） ============
+// 经 nginx/Caddy 等代理部署时，必须信任代理才能让 RemoteIpAddress 与 HTTPS 判断正确
+// （LoginGuard 的 IP 限流、SecurityHeaders 的 HSTS 判断、速率限制的客户端 IP 都依赖它）。
+// 默认信任本机回环；生产请把反向代理 IP 写入 ReverseProxy:TrustedProxies（逗号分隔）。
+var fwdOptions = new ForwardedHeadersOptions
+{
+	ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto,
+	KnownProxies = { IPAddress.Loopback, IPAddress.IPv6Loopback },
+};
+foreach (var ip in (builder.Configuration["ReverseProxy:TrustedProxies"] ?? "")
+			 .Split(',', StringSplitOptions.RemoveEmptyEntries))
+{
+	if (IPAddress.TryParse(ip.Trim(), out var addr)) fwdOptions.KnownProxies.Add(addr);
+}
+foreach (var cidr in (builder.Configuration["ReverseProxy:TrustedNetworks"] ?? "")
+			   .Split(',', StringSplitOptions.RemoveEmptyEntries))
+{
+	if (Microsoft.AspNetCore.HttpOverrides.IPNetwork.TryParse(cidr.Trim(), out Microsoft.AspNetCore.HttpOverrides.IPNetwork net))
+		fwdOptions.KnownNetworks.Add(net);
+}
+app.UseForwardedHeaders(fwdOptions);
+
+// ============ 安全响应头（HSTS/CSP/X-Frame-Options 等） ============
+app.UseMiddleware<SecurityHeadersMiddleware>();
 
 // 提示：若使用运行时生成的临时 JWT 密钥，提醒生产环境配置稳定密钥
 if (jwtSecretGenerated)
@@ -185,6 +267,9 @@ app.UseStaticFiles();
 
 // 跨域（必须在认证之前）
 app.UseCors("AllowFrontend");
+
+// 速率限制（在认证之前生效，拦截匿名滥用请求）
+app.UseRateLimiter();
 
 // 全局异常捕获与请求日志（包裹后续管道）
 app.UseMiddleware<AssetManagementSystem.Middlewares.ApiPipelineMiddleware>();

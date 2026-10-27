@@ -5,6 +5,7 @@ using AssetManagementSystem.Services;
 using AssetManagementSystem.Utils;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using SqlSugar;
 using System;
 using System.Linq;
@@ -39,6 +40,7 @@ namespace AssetManagementSystem.Controllers
 		/// 需图形验证码，且同一手机号 1 分钟内不可重复提交，防止刷单
 		/// </summary>
 		[HttpPost("submit")]
+		[EnableRateLimiting("public-form")]
 		public async Task<ApiResult<object>> Submit([FromBody] ContactRequestSubmitDto dto)
 		{
 			dto ??= new ContactRequestSubmitDto();

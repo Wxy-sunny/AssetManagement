@@ -4,6 +4,7 @@ using AssetManagementSystem.Services;
 using AssetManagementSystem.Utils;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.IdentityModel.Tokens;
 using SqlSugar;
 using System.IdentityModel.Tokens.Jwt;
@@ -120,6 +121,7 @@ namespace AssetManagementSystem.Controllers
 		/// 手机号必填：注册时即完成绑定，之后可用手机号 + 验证码登录
 		/// </summary>
 		[HttpPost("register")]
+		[EnableRateLimiting("public-form")]
 		public async Task<ApiResult<object>> Register([FromBody] RegisterDto dto)
 		{
 			try
@@ -182,6 +184,7 @@ namespace AssetManagementSystem.Controllers
 		/// 发送手机验证码（登录/绑定共用）
 		/// </summary>
 		[HttpPost("sms/code")]
+		[EnableRateLimiting("sms")]
 		public ApiResult<object> SendSmsCode([FromBody] SmsCodeDto dto)
 		{
 			var mobile = dto?.mobile?.Trim();
@@ -290,6 +293,7 @@ namespace AssetManagementSystem.Controllers
 		/// 说明：校验通过后写入 BCrypt 哈希，并返回登录账号方便用户直接登录
 		/// </summary>
 		[HttpPost("password/forgot")]
+		[EnableRateLimiting("public-form")]
 		public async Task<ApiResult<object>> ForgotPassword([FromBody] ForgotPasswordDto dto)
 		{
 			try
