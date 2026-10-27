@@ -185,6 +185,29 @@ builder.Services.AddRateLimiter(options =>
 
 var app = builder.Build();
 
+// ============ 主机白名单（Host Filtering） ============
+// 说明：.NET 10 的 WebApplication 不会自动按逗号拆分 AllowedHosts 字符串；
+// 且当 AllowedHosts 写成 JSON 数组时，顶层标量键为 null，框架不会注入 HostFiltering。
+// 这里显式读取（兼容“逗号字符串”与“JSON 数组”两种写法）并注册 HostFilteringOptions，
+// 以支持多主机白名单（本地 localhost + cloudflared 隧道 *.trycloudflare.com 等）。
+var allowedHosts = new List<string>();
+// 优先读取 JSON 数组形式：数组在配置中会被展开为 AllowedHosts:0 / :1 ... 子节点，
+// 且不会覆盖同键的标量（如 appsettings.json 的 AllowedHosts:"*"），故必须优先遍历子节点。
+foreach (var child in builder.Configuration.GetSection("AllowedHosts").GetChildren())
+{
+	if (!string.IsNullOrWhiteSpace(child.Value))
+		allowedHosts.Add(child.Value);
+}
+// 数组为空时（例如未写成数组的环境），回退到“逗号字符串”写法
+if (allowedHosts.Count == 0)
+{
+	var allowedHostsRaw = builder.Configuration["AllowedHosts"];
+	if (!string.IsNullOrWhiteSpace(allowedHostsRaw))
+	{
+		allowedHosts.AddRange(allowedHostsRaw.Split(',',
+			StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+	}
+}
 // ============ 反向代理头（X-Forwarded-For / X-Forwarded-Proto） ============
 // 经 nginx/Caddy 等代理部署时，必须信任代理才能让 RemoteIpAddress 与 HTTPS 判断正确
 // （LoginGuard 的 IP 限流、SecurityHeaders 的 HSTS 判断、速率限制的客户端 IP 都依赖它）。
@@ -206,6 +229,31 @@ foreach (var cidr in (builder.Configuration["ReverseProxy:TrustedNetworks"] ?? "
 		fwdOptions.KnownNetworks.Add(net);
 }
 app.UseForwardedHeaders(fwdOptions);
+
+// 主机白名单校验（必须在路由 / 认证之前执行）
+// 兼容“逗号字符串”与“JSON 数组”两种 AllowedHosts 写法，并支持 *.domain 子域通配符。
+if (allowedHosts.Count > 0)
+{
+	var allowed = allowedHosts;
+	app.Use(async (ctx, next) =>
+	{
+		var host = ctx.Request.Host.Host; // 不含端口
+		var ok = !string.IsNullOrEmpty(host) && allowed.Any(rule =>
+		{
+			if (rule == "*") return true;
+			if (rule.StartsWith("*."))
+				return host.EndsWith(rule.Substring(1), StringComparison.OrdinalIgnoreCase);
+			return string.Equals(rule, host, StringComparison.OrdinalIgnoreCase);
+		});
+		if (!ok)
+		{
+			ctx.Response.StatusCode = 400;
+			await ctx.Response.WriteAsync("Bad Request - Invalid Hostname");
+			return;
+		}
+		await next();
+	});
+}
 
 // ============ 安全响应头（HSTS/CSP/X-Frame-Options 等） ============
 app.UseMiddleware<SecurityHeadersMiddleware>();
@@ -256,11 +304,12 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-//app.UseHttpsRedirection();
-if (!app.Environment.IsDevelopment())
-{
-	app.UseHttpsRedirection();
-}
+// 纯 HTTP 部署（无外层 TLS）时禁用 HTTPS 重定向，否则浏览器会被 307 重定向到
+// 不存在的 https 端口而拒绝访问。部署 TLS（外层 Caddy/证书）时请取消下面注释启用。
+// if (!app.Environment.IsDevelopment())
+// {
+// 	app.UseHttpsRedirection();
+// }
 
 // 启用静态文件访问（资料附件存放于 wwwroot/uploads，用于图片预览等）
 app.UseStaticFiles();

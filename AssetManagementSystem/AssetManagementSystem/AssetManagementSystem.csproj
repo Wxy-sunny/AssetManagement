@@ -1,20 +1,23 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk.Web">
 
+  <!-- 升级说明：.NET 8 LTS 支持于 2026-11-10 结束；已迁移到 .NET 10 LTS（2028-11 前受支持）。
+       构建前需安装 .NET 10 SDK：https://dot.net/v10 或 `winget install Microsoft.DotNet.SDK.10` -->
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="BCrypt.Net-Core" Version="1.6.0" />
-    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.29" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.0" />
     <PackageReference Include="Microsoft.Data.SqlClient" Version="7.0.2" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
     <PackageReference Include="Serilog.AspNetCore" Version="8.0.3" />
     <PackageReference Include="SqlSugarCore" Version="5.1.4.216" />
     <PackageReference Include="StackExchange.Redis" Version="2.8.58" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="6.6.2" />
+    <!-- System.IdentityModel.Tokens.Jwt 走独立的 Microsoft.IdentityModel 版本线（当前 8.x），不随 .NET 主版本号变化 -->
     <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.22.0" />
   </ItemGroup>
 

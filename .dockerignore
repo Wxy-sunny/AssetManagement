@@ -1,0 +1,12 @@
+**/bin
+**/obj
+.git
+**/.vs
+**/.idea
+**/TestResults
+# 后端镜像不需要前端源码（前端单独构建）
+AssetManagementSystem.Frontend
+scripts
+docs
+deploy
+*.user

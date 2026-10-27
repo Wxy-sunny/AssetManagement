@@ -39,7 +39,7 @@ namespace AssetManagementSystem.Models
 		/// <summary>
 		/// 消息内容
 		/// </summary>
-		[SugarColumn(ColumnName = "content", IsNullable = false, ColumnDataType = "nvarchar(max)")]
+		[SugarColumn(ColumnName = "content", IsNullable = false, Length = -1)]
 		public string Content { get; set; }
 
 		/// <summary>

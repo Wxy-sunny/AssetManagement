@@ -28,7 +28,7 @@ namespace AssetManagementSystem.Models
 		[SugarColumn(ColumnName = "title", IsNullable = false, Length = 255)]
 		public string Title { get; set; }
 
-		[SugarColumn(ColumnName = "content", IsNullable = false, ColumnDataType = "nvarchar(max)")]
+		[SugarColumn(ColumnName = "content", IsNullable = false, Length = -1)]
 		public string Content { get; set; }
 
 		/// <summary>

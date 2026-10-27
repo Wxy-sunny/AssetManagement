@@ -1,0 +1,28 @@
+[Unit]
+Description=Asset Management System API (.NET 10)
+After=network.target
+# 若数据库在同机且为 systemd 服务，可取消下行注释以保证启动顺序
+# After=mssql.service
+
+[Service]
+Type=notify
+WorkingDirectory=/opt/asset-api
+ExecStart=/usr/bin/dotnet /opt/asset-api/AssetManagementSystem.dll
+Restart=always
+RestartSec=5
+User=assetapi
+Group=assetapi
+
+# 通过 EnvironmentFile 注入生产环境变量（见 app.env.example）
+# 不要把任何密钥写进本单元文件
+EnvironmentFile=/etc/asset-api/app.env
+
+# 最小权限加固
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+# 若需写日志目录，可放开：ReadWritePaths=/opt/asset-api/logs
+
+[Install]
+WantedBy=multi-user.target

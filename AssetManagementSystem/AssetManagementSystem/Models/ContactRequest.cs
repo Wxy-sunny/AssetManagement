@@ -26,7 +26,7 @@ namespace AssetManagementSystem.Models
 		public string? RequestType { get; set; } = RequestTypes.ResetPassword;
 
 		/// <summary>说明 / 详情</summary>
-		[SugarColumn(ColumnName = "content", IsNullable = true, ColumnDataType = "nvarchar(max)")]
+		[SugarColumn(ColumnName = "content", IsNullable = true, Length = -1)]
 		public string? Content { get; set; }
 
 		/// <summary>处理状态：pending 待处理 / handled 已处理</summary>
@@ -46,7 +46,7 @@ namespace AssetManagementSystem.Models
 		public DateTime? HandleTime { get; set; }
 
 		/// <summary>处理备注</summary>
-		[SugarColumn(ColumnName = "handle_remark", IsNullable = true, ColumnDataType = "nvarchar(max)")]
+		[SugarColumn(ColumnName = "handle_remark", IsNullable = true, Length = -1)]
 		public string? HandleRemark { get; set; }
 	}
 

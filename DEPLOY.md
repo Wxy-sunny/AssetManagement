@@ -88,7 +88,7 @@ server {
 - [ ] `appsettings.Production.json` 的 `AllowedHosts` / `Cors:AllowedOrigins` 已改为真实域名
 - [ ] `DemoData:Enabled=false`（默认即 false）
 - [ ] `DatabaseInitialization:Enabled=false`（首次部署初始化表后可关闭）
-- [ ] `Sms:DebugReturnCode=false`（否则验证码回传前端）
+- [ ] `Sms:ReturnCodeInResponse=false`（否则验证码回传前端）
 - [ ] 反向代理已透传 `X-Forwarded-For` / `X-Forwarded-Proto`，并把代理 IP 加入 `ReverseProxy:TrustedProxies`
 - [ ] TLS 证书有效，HSTS 已开启
 - [ ] 数据库定期备份（含异机/异地副本）
@@ -107,3 +107,73 @@ server {
 - 全局异常中间件（不向客户端泄露堆栈）
 - 文件上传：扩展名白名单 + 大小限制 + SVG 强制附件下载 + `nosniff`
 - Swagger 仅在开发环境开放
+
+---
+
+## 6. 本仓库内置部署模板（`deploy/`）
+
+仓库已提供开箱即用的部署参考文件，按真实域名替换 `example.com` 即可：
+
+| 文件 | 用途 |
+|---|---|
+| `deploy/app.env.example` | 生产环境变量模板，复制为 `/etc/asset-api/app.env` 填入真实值（**切勿提交含真实凭据的文件**） |
+| `deploy/nginx-asset.conf` | nginx 反向代理 + TLS 终止配置（含 HSTS / 安全头 / `/api` 转发 / 附件转发） |
+| `deploy/asset-api.service` | systemd 单元，引用上面的 env 文件并做最小权限加固 |
+
+使用流程简述：
+
+```bash
+# 1) 后端发布（在装有 .NET 10 SDK 的机器上）
+dotnet publish AssetManagementSystem/AssetManagementSystem/AssetManagementSystem.csproj \
+  -c Release -o /opt/asset-api
+
+# 2) 准备环境变量
+sudo cp deploy/app.env.example /etc/asset-api/app.env
+sudo nano /etc/asset-api/app.env   # 填入 Jwt__SecretKey / 连接串 / 管理员密码
+
+# 3) 安装并启用服务
+sudo cp deploy/asset-api.service /etc/systemd/system/
+sudo useradd -r -s /usr/sbin/nologin assetapi
+sudo chown -R assetapi:assetapi /opt/asset-api
+sudo systemctl daemon-reload && sudo systemctl enable --now asset-api
+
+# 4) nginx
+sudo cp deploy/nginx-asset.conf /etc/nginx/sites-available/asset
+#   编辑把 example.com 改为真实域名并配好证书，再软链 + `nginx -t && systemctl reload nginx`
+```
+
+> 注意：前端 `npm run build` 需要 **Node.js ≥ 22.18**（见 `README.md` 环境要求）。
+> 当前构建机若版本过低会构建失败，请在 CI 或专用构建机使用符合要求的 Node 版本，
+> 然后把 `dist/` 部署到 nginx 的 `/var/www/asset-frontend/dist`。
+>
+> 上线前请按第 4 节核对表逐项确认，并完成一次 `scripts/backup/` 下的"备份 → 还原"演练。
+
+---
+
+## 7. Docker 部署（可选，推荐）
+
+仓库已提供容器化打包，免手动安装 .NET / Node 运行时：
+
+| 文件 | 用途 |
+|---|---|
+| `AssetManagementSystem/AssetManagementSystem/Dockerfile` | 后端多阶段镜像（.NET 10 SDK 构建 → aspnet:10.0 运行），监听 5099 |
+| `AssetManagementSystem.Frontend/Dockerfile` | 前端镜像（node:22 构建 → nginx:alpine 托管并反向代理 `/api`） |
+| `AssetManagementSystem.Frontend/nginx.conf` | 前端容器内 nginx 配置（SPA 回退 + 代理到 `backend:5099`） |
+| `docker-compose.yml` | 编排 backend / frontend / redis，可选自带 mssql（需 `--profile db`） |
+| `.env.example` | compose 用密钥模板，复制为 `.env` 填入 |
+
+快速开始：
+
+```bash
+cp .env.example .env && nano .env        # 填入 Jwt__SecretKey / AssetConnection / 等
+docker compose up -d                     # 前端暴露在宿主机 8080
+# 如需自带 SQL Server：docker compose --profile db up -d
+```
+
+> 安全提醒：
+> - 本编排仅内部 HTTP。**不要直接把 8080 暴露到公网**；请在宿主机再用 nginx / Caddy / Traefik 做 TLS 终止（证书 + 443 转发到 8080）。
+> - 环境变量来自 `.env`（已被 git 忽略），不会烤进镜像——这也是"环境变量在云端服务器编辑"的位置。
+> - `ReverseProxy__TrustedProxies=172.16.0.0/12` 已信任 Docker 网桥，确保登录 IP 限流取到真实客户端 IP。
+> - 自带 mssql 服务的数据在 `mssql-data` 卷；生产建议用云数据库并另行备份。
+
+
