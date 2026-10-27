@@ -1,179 +1,167 @@
-# 生产部署指南（公网部署）
+# 部署指南（SQLite + Docker，腾讯云 2GB 小机）
 
-本系统后端为 .NET 8（Kestrel），前端为 Vite 静态资源。**不要**把 Kestrel 的 5099 端口直接暴露在公网；
-务必放在反向代理（nginx / Caddy）之后做 TLS 终止与安全加固。
+本指南针对 **腾讯云 CVM（2 核 2GB / Ubuntu）** 的最小化部署：内置 **SQLite** 数据库 + Docker 一键编排，直接用公网 IP 访问（HTTP 80，无需 TLS 即可演示）。
 
 ---
 
-## 1. 架构
+## 分支策略
+
+| 分支 | 用途 | 说明 |
+|---|---|---|
+| `main` | **已锁定**（需 PR 才能合并） | SQL Server 原始基线，作为稳定参考 |
+| `sqlite` | **本部署用** | SQLite 内置数据库 + Docker 编排，前端端口 80 |
+| `sqlserver-docker` | 需要 SQL Server 时用 | compose 自带 `db` 容器，适合本地 / 有内存的机器 |
+
+> 开发请在子分支进行（`git checkout -b feat-xxx sqlite`），改完开 PR 合回 `main`。
+> `main` 已配置分支保护规则（Ruleset `protect-main`）：直接 `git push origin main` 会被拒绝。
+
+---
+
+## 架构
 
 ```
-[ 用户浏览器 ]
-      │  HTTPS (443)
-      ▼
-[ nginx / Caddy ]  ← TLS、HSTS、安全头、限流、静态资源
-      │  HTTP (内部) + X-Forwarded-For / X-Forwarded-Proto
-      ▼
-[ Kestrel :5099 ]  ← ASP.NET Core API
-      ▼
-[ SQL Server / MySQL ]  + [ Redis（可选，验证码缓存） ]
+[ 浏览器 ] ──HTTP 80──▶ [ 前端容器 nginx:80 ] ──/api/──▶ [ 后端 Kestrel:5099 ]
+                                                     │
+                                           [ Redis:6379 ]  （验证码缓存）
+                                           [ SQLite 文件 /app/data/asset.db ]
 ```
 
 ---
 
-## 2. 环境变量（生产必须注入，切勿写入仓库）
+## 一、服务器准备
 
-| 变量 | 说明 |
-|---|---|
-| `ASPNETCORE_ENVIRONMENT` | 设为 `Production`，启用安全头、HTTPS 重定向、关闭 Swagger |
-| `Jwt__SecretKey` | **≥32 字节**的稳定密钥（base64 或任意长随机串）。缺失则生产环境启动直接失败 |
-| `ConnectionStrings__AssetConnection` | 数据库连接串（含密码）。例如 `Server=...;Database=...;User Id=...;Password=...;` |
-| `AdminSeed__Password`（可选） | 首次初始化的管理员密码；留空则自动生成随机强密码并打印到控制台 |
-| `ReverseProxy__TrustedProxies`（可选） | 反向代理 IP，逗号分隔（如 `127.0.0.1,10.0.0.5`）。未配置会取错客户端 IP |
-| `Redis__Connection`（可选） | Redis 连接串；缺失时验证码自动降级为内存缓存 |
-
-> 生产配置模板见 `AssetManagementSystem/appsettings.Production.json`。该文件**不含任何真实凭据**，
-> 所有机密走环境变量（`__` 双下划线表示配置层级）。
-
----
-
-## 3. nginx 参考配置
-
-```nginx
-server {
-    listen 443 ssl http2;
-    server_name your-domain.com www.your-domain.com;
-
-    ssl_certificate     /etc/nginx/ssl/your-domain.com/fullchain.pem;
-    ssl_certificate_key /etc/nginx/ssl/your-domain.com/privkey.pem;
-    # 推荐 Mozilla  intermediate 套件，并开启 OCSP stapling
-
-    # 安全头（也可由应用层下发，这里再补一层更稳）
-    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header X-Frame-Options "DENY" always;
-    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-
-    # 前端静态资源（npm run build 产物）
-    location / {
-        root /var/www/asset-frontend/dist;
-        try_files $uri $uri/ /index.html;
-    }
-
-    # 上传文件（按需在代理层限制大小）
-    client_max_body_size 100m;
-
-    # API 反向代理：务必透传 X-Forwarded-*，否则 IP 限流/登录守卫会取错客户端 IP
-    location /api/ {
-        proxy_pass http://127.0.0.1:5099/;
-        proxy_set_header Host              $host;
-        proxy_set_header X-Real-IP        $remote_addr;
-        proxy_set_header X-Forwarded-For  $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header X-Forwarded-Host  $host;
-    }
-}
-```
-
-> 前端 `vite.config.ts` 中 `proxy` 的 `/api` 前缀仅用于本地开发。生产由 nginx 负责 `/api` 转发，
-> 前端打包时 `VITE_API_BASE` 应设为空或 `/api`，使请求走相对路径。
-
----
-
-## 4. 上线前核对表
-
-- [ ] `ASPNETCORE_ENVIRONMENT=Production`
-- [ ] `Jwt__SecretKey` 已设置（≥32 字节，且与备份一致、多实例相同）
-- [ ] `ConnectionStrings__AssetConnection` 已设置，**非**空
-- [ ] `appsettings.Production.json` 的 `AllowedHosts` / `Cors:AllowedOrigins` 已改为真实域名
-- [ ] `DemoData:Enabled=false`（默认即 false）
-- [ ] `DatabaseInitialization:Enabled=false`（首次部署初始化表后可关闭）
-- [ ] `Sms:ReturnCodeInResponse=false`（否则验证码回传前端）
-- [ ] 反向代理已透传 `X-Forwarded-For` / `X-Forwarded-Proto`，并把代理 IP 加入 `ReverseProxy:TrustedProxies`
-- [ ] TLS 证书有效，HSTS 已开启
-- [ ] 数据库定期备份（含异机/异地副本）
-- [ ] `npm audit` 与 `dotnet list package --vulnerable` 已扫描并修复高危项
-- [ ] 已修改初始管理员密码（若依赖随机生成密码，请先登录再改）
-
----
-
-## 5. 已内置的安全能力
-
-- 密码 BCrypt 哈希；刷新令牌仅存 SHA256 哈希
-- JWT 完整校验（Issuer/Audience/Lifetime/SigningKey），生产缺失密钥即启动失败
-- 登录防爆破（账号锁定 + 可选 IP 限流）
-- 速率限制：`/auth/sms/code`（10 分钟 5 次）、`/auth/register`、`/auth/password/forgot`、`/request/submit`（10 分钟 10 次/IP）
-- 安全响应头：HSTS（HTTPS 下）、CSP、X-Frame-Options、X-Content-Type-Options、Referrer-Policy；移除 `Server` 头
-- 全局异常中间件（不向客户端泄露堆栈）
-- 文件上传：扩展名白名单 + 大小限制 + SVG 强制附件下载 + `nosniff`
-- Swagger 仅在开发环境开放
-
----
-
-## 6. 本仓库内置部署模板（`deploy/`）
-
-仓库已提供开箱即用的部署参考文件，按真实域名替换 `example.com` 即可：
-
-| 文件 | 用途 |
-|---|---|
-| `deploy/app.env.example` | 生产环境变量模板，复制为 `/etc/asset-api/app.env` 填入真实值（**切勿提交含真实凭据的文件**） |
-| `deploy/nginx-asset.conf` | nginx 反向代理 + TLS 终止配置（含 HSTS / 安全头 / `/api` 转发 / 附件转发） |
-| `deploy/asset-api.service` | systemd 单元，引用上面的 env 文件并做最小权限加固 |
-
-使用流程简述：
-
+### 1. 登录
 ```bash
-# 1) 后端发布（在装有 .NET 10 SDK 的机器上）
-dotnet publish AssetManagementSystem/AssetManagementSystem/AssetManagementSystem.csproj \
-  -c Release -o /opt/asset-api
-
-# 2) 准备环境变量
-sudo cp deploy/app.env.example /etc/asset-api/app.env
-sudo nano /etc/asset-api/app.env   # 填入 Jwt__SecretKey / 连接串 / 管理员密码
-
-# 3) 安装并启用服务
-sudo cp deploy/asset-api.service /etc/systemd/system/
-sudo useradd -r -s /usr/sbin/nologin assetapi
-sudo chown -R assetapi:assetapi /opt/asset-api
-sudo systemctl daemon-reload && sudo systemctl enable --now asset-api
-
-# 4) nginx
-sudo cp deploy/nginx-asset.conf /etc/nginx/sites-available/asset
-#   编辑把 example.com 改为真实域名并配好证书，再软链 + `nginx -t && systemctl reload nginx`
+ssh root@<你的公网IP>
 ```
 
-> 注意：前端 `npm run build` 需要 **Node.js ≥ 22.18**（见 `README.md` 环境要求）。
-> 当前构建机若版本过低会构建失败，请在 CI 或专用构建机使用符合要求的 Node 版本，
-> 然后把 `dist/` 部署到 nginx 的 `/var/www/asset-frontend/dist`。
->
-> 上线前请按第 4 节核对表逐项确认，并完成一次 `scripts/backup/` 下的"备份 → 还原"演练。
+### 2. 加 2GB swap（2GB 机器必做，防 OOM）
+```bash
+sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile
+sudo mkswap /swapfile && sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+```
+✅ 验证：`swapon --show` 看到 `/swapfile`；`free -h` 的 Swap 约 2G。
+
+### 3. 安装 Docker + 腾讯云内网加速（3Mbps 公网拉镜像很慢，走内网加速器）
+```bash
+sudo apt-get update
+sudo apt-get install -y docker.io docker-compose-v2
+sudo systemctl enable --now docker
+sudo mkdir -p /etc/docker
+sudo tee /etc/docker/daemon.json >/dev/null <<'EOF'
+{ "registry-mirrors": ["https://mirror.ccs.tencentyun.com"] }
+EOF
+sudo systemctl restart docker
+```
+✅ 验证：`docker --version`、`docker compose version`（显示 v2.x）；`docker info | grep -A1 Mirrors` 显示 `tencentyun`。
+> 若 `docker-compose-v2` 装不上，改用 `sudo apt-get install -y docker-compose-plugin` 或 `curl -fsSL https://get.docker.com | sh`。
+
+### 4. 停掉系统 nginx（它默认占 80，会和容器抢端口）
+```bash
+sudo systemctl stop nginx 2>/dev/null; sudo systemctl disable nginx 2>/dev/null
+sudo ss -lntp | grep ':80' || echo "80 已空闲"
+```
+✅ 验证：显示“80 已空闲”。
 
 ---
 
-## 7. Docker 部署（可选，推荐）
+## 二、部署（sqlite 分支）
 
-仓库已提供容器化打包，免手动安装 .NET / Node 运行时：
-
-| 文件 | 用途 |
-|---|---|
-| `AssetManagementSystem/AssetManagementSystem/Dockerfile` | 后端多阶段镜像（.NET 10 SDK 构建 → aspnet:10.0 运行），监听 5099 |
-| `AssetManagementSystem.Frontend/Dockerfile` | 前端镜像（node:22 构建 → nginx:alpine 托管并反向代理 `/api`） |
-| `AssetManagementSystem.Frontend/nginx.conf` | 前端容器内 nginx 配置（SPA 回退 + 代理到 `backend:5099`） |
-| `docker-compose.yml` | 编排 backend / frontend / redis，可选自带 mssql（需 `--profile db`） |
-| `.env.example` | compose 用密钥模板，复制为 `.env` 填入 |
-
-快速开始：
-
+### 5. 拉代码
 ```bash
-cp .env.example .env && nano .env        # 填入 Jwt__SecretKey / AssetConnection / 等
-docker compose up -d                     # 前端暴露在宿主机 8080
-# 如需自带 SQL Server：docker compose --profile db up -d
+sudo mkdir -p /opt/asset
+sudo git clone -b sqlite https://github.com/Wxy-sunny/AssetManagement.git /opt/asset
+cd /opt/asset
+```
+✅ 验证：`ls` 看到 `docker-compose.yml`；`git branch` 显示 `* sqlite`。
+
+### 6. 生成密钥并写 `.env`
+`.env` 已被 git 忽略，clone 下来没有，必须手动创建：
+```bash
+JWT=$(openssl rand -base64 48); ADMIN=$(openssl rand -base64 18)
+sudo tee .env >/dev/null <<EOF
+Jwt__SecretKey=$JWT
+DbType=sqlite
+AssetConnection=DataSource=/app/data/asset.db
+AdminSeed__Password=$ADMIN
+Redis__Connection=redis:6379
+EOF
+cat .env
+```
+✅ 验证：输出 5 行，且 `AdminSeed__Password` 非空。
+
+### 7. 腾讯云控制台放通 80（控制台操作，非命令）
+实例 → 防火墙 / 安全组 → 添加入站规则：**TCP 80**，来源 `0.0.0.0/0`；`22` 保持开放。
+
+### 8. 构建并启动
+```bash
+sudo docker compose up -d --build
+```
+✅ 验证：`sudo docker compose ps` 三个服务状态均为 `Up`。
+
+### 9. 看日志确认建表 + 播种
+```bash
+sudo docker compose logs backend | tail -30
+```
+✅ 验证：出现 `成功创建 12 个表`、`已初始化管理员账号：admin`。
+
+### 10. 接口验证
+```bash
+curl -s http://127.0.0.1/api/auth/captcha | head -c 200        # 容器层
+curl -s http://<公网IP>/api/auth/captcha | head -c 200          # nginx + 安全组
+```
+✅ 验证：两次都返回 JSON（含 `imageBase64`、`captchaId`），不是 400。
+
+### 11. 浏览器登录
+打开 `http://<公网IP>`，用 `admin` + 第 6 步的 `ADMIN` 密码登录（`grep AdminSeed .env` 可查）。
+
+---
+
+## 三、环境自检（确认前面步骤是否完成）
+
+在服务器执行，对照判断进度：
+```bash
+echo "=== swap ==="; swapon --show
+echo "=== docker ==="; docker --version; docker compose version; sudo systemctl is-active docker
+echo "=== 镜像加速 ==="; cat /etc/docker/daemon.json
+echo "=== 80 占用 ==="; sudo ss -lntp | grep ':80' || echo "80 空闲"
+echo "=== 代码 ==="; ls /opt/asset/docker-compose.yml 2>/dev/null && echo 已有 || echo 没有
 ```
 
-> 安全提醒：
-> - 本编排仅内部 HTTP。**不要直接把 8080 暴露到公网**；请在宿主机再用 nginx / Caddy / Traefik 做 TLS 终止（证书 + 443 转发到 8080）。
-> - 环境变量来自 `.env`（已被 git 忽略），不会烤进镜像——这也是"环境变量在云端服务器编辑"的位置。
-> - `ReverseProxy__TrustedProxies=172.16.0.0/12` 已信任 Docker 网桥，确保登录 IP 限流取到真实客户端 IP。
-> - 自带 mssql 服务的数据在 `mssql-data` 卷；生产建议用云数据库并另行备份。
+---
 
+## 四、故障排查
 
+1. **某服务非 Up** → `sudo docker compose logs <服务名>` 看报错。
+2. **后端起不来** → 多半 `.env` 缺项；`cat .env` 核对 5 行齐全。
+3. **`:80` 被占用** → `sudo ss -lntp | grep ':80'` 找出进程（常见是系统 nginx），停掉：`sudo systemctl stop nginx`。
+4. **浏览器打不开** → 先在服务器 `curl http://<公网IP>/api/auth/captcha`：通说明容器/反代正常、问题在安全组；不通再查本机 80 监听与容器日志。
+5. **首次建表报错** → 清空数据重来：`sudo docker compose down -v`（会删除 `asset-data` 卷，数据丢失，仅首次调试用）。
+
+---
+
+## 五、其他分支（SQL Server）
+
+`sqlserver-docker` 分支自带 `db` 容器，`.env` 改为：
+```
+Jwt__SecretKey=<随机串>
+DbType=sqlserver
+AssetConnection=Server=db,1433;Database=AssetDB;User Id=sa;Password=<强密码>;TrustServerCertificate=True;
+DbSaPassword=<与上面一致的强密码>
+AdminSeed__Password=<强密码>
+Redis__Connection=redis:6379
+```
+启动命令相同（`sudo docker compose up -d --build`，compose 已含 `db` 服务）。
+⚠️ SQL Server 至少需要 2GB 内存，不适合本 2GB 小机；该分支适合本地或内存充足的机器。
+
+---
+
+## 六、安全与上线核对
+
+- [ ] `Jwt__SecretKey` ≥ 32 字节且稳定（重启不变）
+- [ ] 登录后立即在后台修改管理员初始密码
+- [ ] 定期备份数据：直接拷贝 `asset-data` 卷里的 `asset.db` 文件
+- [ ] 公网仅暴露 80；如需 HTTPS，在宿主机外层做 TLS 终止，再把 `Program.cs` 中注释掉的 `UseHttpsRedirection` 启用
+- [ ] 表结构稳定后，将 compose 环境变量 `DatabaseInitialization__Enabled` 改为 `"false"`
+- [ ] 应用层已内置：BCrypt 密码哈希、JWT 完整校验、登录防爆破、速率限制、安全响应头（HSTS 仅在 HTTPS 下下发）、Swagger 仅开发环境开放
