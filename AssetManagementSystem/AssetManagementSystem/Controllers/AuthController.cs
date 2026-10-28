@@ -190,10 +190,11 @@ namespace AssetManagementSystem.Controllers
 
 		/// <summary>
 		/// 发送手机验证码（登录/绑定共用）
+		/// 只有短信通道真实发送成功才会返回"已发送"；发送失败会返回具体错误原因。
 		/// </summary>
 		[HttpPost("sms/code")]
 		[EnableRateLimiting("sms")]
-		public ApiResult<object> SendSmsCode([FromBody] SmsCodeDto dto)
+		public async Task<ApiResult<object>> SendSmsCode([FromBody] SmsCodeDto dto)
 		{
 			var mobile = dto?.mobile?.Trim();
 			if (string.IsNullOrWhiteSpace(mobile) || !IsMobile(mobile))
@@ -202,10 +203,15 @@ namespace AssetManagementSystem.Controllers
 			if (!_smsCodeService.CanSend(mobile, out var waitSeconds))
 				return ApiResult<object>.Fail("400", $"发送过于频繁，请 {waitSeconds} 秒后再试");
 
-			var code = _smsCodeService.Generate(mobile);
+			// 生成验证码并真实下发；发送失败时不会缓存验证码
+			var result = await _smsCodeService.GenerateAndSendAsync(mobile);
+			if (!result.Success)
+				return ApiResult<object>.Fail("500", result.Message);
 
-			// 本地联调：未接入短信网关时把验证码回传给前端，便于测试
-			var data = _smsCodeService.ReturnCodeInResponse ? new { code } : null;
+			// 联调模式（仅 log 通道或显式开启时）：把验证码回传给前端，便于测试
+			var data = _smsCodeService.ReturnCodeInResponse && !string.IsNullOrEmpty(result.Code)
+				? new { code = result.Code }
+				: null;
 			return ApiResult<object>.Success(data, "验证码已发送");
 		}
 

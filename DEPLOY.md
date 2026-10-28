@@ -296,7 +296,7 @@ curl -s http://<你的公网IP>/api/auth/captcha | head -c 200
 | 浏览器跳到 https 打不开 | 旧版强制 HTTPS 重定向 / HSTS | 本项目已关闭 `UseHttpsRedirection`、nginx 用 `$scheme`；若浏览器缓存了 HSTS，用无痕窗口 |
 | 登录后立刻跳回登录页 | **用户没分配角色** | 后台「权限管理 → 用户管理」给该用户选角色，然后**重新登录**（JWT 里的角色是登录时写入的） |
 | 登录后提示"没有该功能的操作权限" | 角色权限没配 | 后台「权限管理 → 角色管理 → 分配权限」勾选对应功能 |
-| 短信验证码收不到 | **项目未接入短信网关**，验证码只打印在后端日志 | 见第 11 节 |
+| 短信验证码收不到 | 短信服务未启用（默认关闭），或服务商配置/签名/模板有误 | 见第 11 节；后端日志 `grep SMS` 可看具体错误码 |
 | 磁盘满 | 构建缓存 + 镜像占空间 | `docker system prune -a`（会删未使用的镜像） |
 
 ---
@@ -349,21 +349,74 @@ sudo docker compose up -d --build
 
 ---
 
-## 11. 已知限制：短信验证码
+## 11. 短信验证码配置（默认未启用）
 
-当前代码**没有接入任何短信服务商**（项目内无阿里云/腾讯云短信 SDK）：
+短信功能**已完整接入并可配置**，但**默认关闭**：未配置时接口会明确返回“短信服务未启用”，**不会再出现“提示已发送、手机却收不到”的假成功**。
 
-- `SmsCodeService` 生成验证码后只 `Console.WriteLine` 打印到**后端日志**；
-- 接口仍返回"验证码已发送"，因此前端看起来成功、手机却收不到；
-- 联调开关 `Sms:ReturnCodeInResponse` 在所有环境默认 `false`，即前端也拿不到验证码。
+### 11.1 四种通道
 
-临时联调办法：在服务器执行
-```bash
-sudo docker compose logs backend | grep "\[SMS\]"
+| Provider | 说明 | 需要填的参数 |
+|---|---|---|
+| `none` | 不发送（默认） | — |
+| `log` | 只写后端日志，**不真实下发**，用于内网演示/联调 | 无（可开 `ReturnCodeInResponse` 让验证码直接显示在页面上） |
+| `aliyun` | 阿里云短信（dysmsapi），**真实下发** | `AccessKeyId`、`AccessKeySecret`、`SignName`、`TemplateCode` |
+| `webhook` | 自建 / 第三方 HTTP 网关，**真实下发** | `WebhookUrl`（可选 `WebhookToken`） |
+
+### 11.2 接入阿里云（真实发送）
+
+1. 阿里云控制台开通「短信服务」，创建**签名**（`SignName`，需审核通过）和**验证码模板**（`TemplateCode`，模板变量名固定为 `code`）。
+2. 拿到 `AccessKeyId` / `AccessKeySecret`。
+3. 在服务器 `/opt/asset/.env` 追加：
 ```
-即可看到该手机号的验证码。
+SmsEnabled=true
+SmsProvider=aliyun
+SmsAccessKeyId=你的AccessKeyId
+SmsAccessKeySecret=你的AccessKeySecret
+SmsSignName=你的签名
+SmsTemplateCode=SMS_123456789
+# 可选：业务通知类短信模板（模板变量名 content）
+SmsTextTemplateCode=SMS_987654321
+```
+4. 重启后端使配置生效：
+```bash
+cd /opt/asset && sudo docker compose up -d backend
+```
 
-要真正发送短信，需引入 SDK（如阿里云 `Aliyun.SDK.Dysmsapi`）并配置 `AccessKeyId/Secret`、`SignName`、`TemplateCode`，同时把开关 `Sms:Enabled` 打开并**严格校验 SDK 返回码**（当前是无条件返回成功）。属于独立需求，未包含在本次部署内。
+> 实现说明：后端直接调用阿里云 OpenAPI 并自行完成 HMAC-SHA1 签名（`Services/Sms/AliyunSigner.cs`），**没有引入阿里云 SDK**，镜像体积和构建时间不受影响。
+
+### 11.3 接入自建 / 第三方网关（webhook）
+
+在 `/opt/asset/.env` 追加：
+```
+SmsEnabled=true
+SmsProvider=webhook
+SmsWebhookUrl=https://your-gateway/sms
+SmsWebhookToken=可选的校验令牌
+```
+后端会以 `POST`（JSON）转发到该地址：
+```json
+{ "type": "code", "mobile": "13800138000", "code": "123456", "text": null, "timestamp": 1760000000 }
+```
+`type` 为 `code`（验证码）或 `text`（业务通知）；配了 Token 会带请求头 `X-Sms-Token`。
+
+### 11.4 联调模式（不真实发短信）
+
+```
+SmsEnabled=true
+SmsProvider=log
+SmsReturnCodeInResponse=true
+```
+验证码会写进后端日志，并**直接显示在登录页上**，方便自测：
+```bash
+sudo docker compose logs backend | grep "SMS-LOG"
+```
+
+### 11.5 注意事项
+
+- 发送失败时**不会写入验证码缓存**（先发后存），用户输入任何验证码都无效，不会出现“发不出去但验证码却有效”的错乱。
+- 限流仍在：同 IP 10 分钟 5 次、同一手机号 60 秒 1 次。
+- 签名/模板审核不通过时，后端日志会打印阿里云返回的错误码（如 `isv.SMS_SIGNATURE_ILLEGAL`），可据此排查。
+- 全部参数也可直接用 `Sms__Xxx` 环境变量注入（compose 已透传，见 `docker-compose.yml`）。
 
 ---
 

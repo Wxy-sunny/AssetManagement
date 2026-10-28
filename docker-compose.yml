@@ -28,6 +28,20 @@ services:
       Redis__Connection: ${Redis__Connection}
       # 信任 Docker 网桥子网，使 X-Forwarded-For 正确反映真实客户端 IP
       ReverseProxy__TrustedProxies: 172.16.0.0/12
+      # 短信服务：默认不启用（接口会返回"短信服务未启用"，不会假成功）。
+      # 需要真实短信时在 .env 里填 SmsProvider=aliyun + 密钥/签名/模板，或 SmsProvider=webhook + WebhookUrl。
+      Sms__Enabled: ${SmsEnabled:-false}
+      Sms__Provider: ${SmsProvider:-none}
+      Sms__AccessKeyId: ${SmsAccessKeyId:-}
+      Sms__AccessKeySecret: ${SmsAccessKeySecret:-}
+      Sms__SignName: ${SmsSignName:-}
+      Sms__TemplateCode: ${SmsTemplateCode:-}
+      Sms__TextTemplateCode: ${SmsTextTemplateCode:-}
+      Sms__RegionId: ${SmsRegionId:-cn-hangzhou}
+      Sms__Endpoint: ${SmsEndpoint:-https://dysmsapi.aliyuncs.com/}
+      Sms__WebhookUrl: ${SmsWebhookUrl:-}
+      Sms__WebhookToken: ${SmsWebhookToken:-}
+      Sms__ReturnCodeInResponse: ${SmsReturnCodeInResponse:-false}
       # 全新数据库时由应用自动建表并播种管理员（演示/首次部署用；稳定后改为 "false"）
       DatabaseInitialization__Enabled: "true"
       DatabaseInitialization__CreateTablesOnStartup: "true"
