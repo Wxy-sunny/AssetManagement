@@ -136,6 +136,9 @@
               <el-link type="primary" :underline="false" @click="openContact">
                 联系管理员
               </el-link>
+              <el-link type="primary" :underline="false" @click="goIntro">
+                系统介绍
+              </el-link>
             </div>
           </el-form>
         </el-tab-pane>
@@ -187,6 +190,11 @@
                 >登 录</el-button
               >
             </el-form-item>
+            <div class="extra-row intro-row">
+              <el-link type="primary" :underline="false" @click="goIntro">
+                系统介绍
+              </el-link>
+            </div>
           </el-form>
         </el-tab-pane>
 
@@ -1132,5 +1140,9 @@ const handleContactSubmit = async () => {
   justify-content: flex-end;
   gap: 16px;
   margin-bottom: 4px;
+}
+/* 手机号登录页只有「系统介绍」一个链接，居中显示更协调 */
+.intro-row {
+  justify-content: center;
 }
 </style>
