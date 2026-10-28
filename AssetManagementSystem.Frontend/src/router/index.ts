@@ -45,6 +45,13 @@ const router = createRouter({
       meta: { title: '无访问权限' },
     },
     {
+      // 系统介绍页：公开可访问（未登录也能看），供登录页 Logo 点击跳转
+      path: '/intro',
+      name: 'Intro',
+      component: () => import('@/views/Intro.vue'),
+      meta: { title: '系统介绍' },
+    },
+    {
       path: '/:pathMatch(.*)*',
       name: 'NotFound',
       component: () => import('@/views/error/NotFound.vue'),
@@ -139,6 +146,9 @@ const router = createRouter({
   ],
 })
 
+// 公开页面：未登录也可访问（登录页、系统介绍页）
+const PUBLIC_PATHS = ['/login', '/intro']
+
 // 导航守卫：未登录跳转 login，已登录访问 login 跳转 dashboard；
 // 目标页面声明了 permission 且当前用户没有该权限时，跳转到 403 页
 router.beforeEach((to, from, next) => {
@@ -149,6 +159,10 @@ router.beforeEach((to, from, next) => {
     return
   }
   if (!token) {
+    if (PUBLIC_PATHS.includes(to.path)) {
+      next()
+      return
+    }
     next('/login')
     return
   }
