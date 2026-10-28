@@ -47,16 +47,13 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="180" fixed="right">
+        <el-table-column v-if="canManage" label="操作" width="180" fixed="right">
           <template #default="{ row }">
-            <template v-if="canManage">
-              <el-button link type="primary" size="small" @click="openDialog(row, true)">
-                新增下级
-              </el-button>
-              <el-button link type="primary" size="small" @click="openDialog(row)">编辑</el-button>
-              <el-button link type="danger" size="small" @click="handleDelete(row)">删除</el-button>
-            </template>
-            <span v-else class="no-perm">无操作权限</span>
+            <el-button link type="primary" size="small" @click="openDialog(row, true)">
+              新增下级
+            </el-button>
+            <el-button link type="primary" size="small" @click="openDialog(row)">编辑</el-button>
+            <el-button link type="danger" size="small" @click="handleDelete(row)">删除</el-button>
           </template>
         </el-table-column>
         <template #empty>

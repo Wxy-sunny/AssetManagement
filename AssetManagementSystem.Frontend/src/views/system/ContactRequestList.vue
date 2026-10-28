@@ -55,14 +55,21 @@
         <el-table-column label="操作" width="100" fixed="right">
           <template #default="{ row }">
             <el-button
-              v-if="row.status === 'pending'"
+              v-if="canManage && row.status === 'pending'"
               link
               type="primary"
               size="small"
               @click="openHandle(row)"
               >处理</el-button
             >
-            <el-button v-else link type="info" size="small" @click="openHandle(row)">查看</el-button>
+            <el-button
+              v-else-if="row.status !== 'pending'"
+              link
+              type="info"
+              size="small"
+              @click="openHandle(row)"
+              >查看</el-button
+            >
           </template>
         </el-table-column>
         <template #empty>
@@ -137,7 +144,7 @@
       <template #footer>
         <el-button @click="dialogVisible = false">关闭</el-button>
         <el-button
-          v-if="current.status === 'pending'"
+          v-if="canManage && current.status === 'pending'"
           type="primary"
           :loading="submitting"
           @click="submitHandle"
@@ -149,9 +156,11 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Search, Refresh } from '@element-plus/icons-vue'
+import { useUserStore } from '@/stores/user'
+import { PERMISSIONS } from '@/types'
 import {
   getRequestPage,
   handleRequest,
@@ -160,6 +169,10 @@ import {
   type ContactRequestItem,
   type ContactRequestQuery,
 } from '@/api/request'
+
+const userStore = useUserStore()
+// 无「联系请求处理」权限时，隐藏处理/标记已处理入口（仅保留查看）
+const canManage = computed(() => userStore.hasPermission(PERMISSIONS.RequestManage))
 
 const loading = ref(false)
 const submitting = ref(false)

@@ -42,10 +42,12 @@ namespace AssetManagementSystem.Attributes
 
 			if (string.IsNullOrWhiteSpace(roleId))
 			{
-				// 未认证的请求交由 [Authorize] 处理，这里只做兜底
-				context.Result = new ObjectResult(ApiResult<object>.Fail("401", "未登录或登录信息无效"))
+				// 已登录但没有分配角色：属于"无权限"而非"未登录"。
+				// 这里返回 403（而非 401），否则前端会把它当成登录失效而清空登录态、反复跳回登录页。
+				// 真正的未认证请求由 [Authorize] 处理（返回 401）。
+				context.Result = new ObjectResult(ApiResult<object>.Fail("403", "账号尚未分配角色，请联系管理员"))
 				{
-					StatusCode = 401
+					StatusCode = 403
 				};
 				return;
 			}

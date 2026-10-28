@@ -169,6 +169,8 @@ namespace AssetManagementSystem.Controllers
 					PassWord = PasswordHelper.Hash(dto.password), // BCrypt 哈希存储
 					Email = dto.email,
 					Mobile = mobile,
+					// 随机分配一个系统内置头像（用户可在个人中心自行更换）
+					Avatar = BuiltinAvatars.PickRandom(_env),
 					IsEnabled = true,
 					StatusCode = 1,
 					StatusDesc = "启用",
@@ -455,17 +457,10 @@ namespace AssetManagementSystem.Controllers
 				[HttpGet("avatars")]
 				public ApiResult<object> GetDefaultAvatars()
 				{
-				var root = _env.WebRootPath ?? Path.Combine(_env.ContentRootPath, "wwwroot");
-				var dir = Path.Combine(root, "avatars");
-				if (!Directory.Exists(dir))
-					return ApiResult<object>.Success(new List<string>(), "暂无内置头像");
-
-				var urls = Directory.EnumerateFiles(dir)
-					.Where(f => IsImageExt(Path.GetExtension(f)))
-					.OrderBy(f => f)
-					.Select(f => "/avatars/" + Path.GetFileName(f))
-					.ToList();
-				return ApiResult<object>.Success(urls, "获取成功");
+					var urls = BuiltinAvatars.GetUrls(_env);
+					return urls.Count == 0
+						? ApiResult<object>.Success(new List<string>(), "暂无内置头像")
+						: ApiResult<object>.Success(urls, "获取成功");
 				}
 
 				/// <summary>

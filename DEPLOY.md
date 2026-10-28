@@ -1,86 +1,196 @@
-# 部署指南（SQLite + Docker，腾讯云 2GB 小机）
+# 生产部署指南（SQLite + Docker，腾讯云 2GB 小机）
 
-本指南针对 **腾讯云 CVM（2 核 2GB / Ubuntu）** 的最小化部署：内置 **SQLite** 数据库 + Docker 一键编排，直接用公网 IP 访问（HTTP 80，无需 TLS 即可演示）。
+本指南记录**实际走通的一次完整部署流程**：腾讯云 CVM（2 核 2GB / 3Mbps / Ubuntu）、内置 SQLite 数据库、Docker 一键编排、用公网 IP 直接访问（HTTP 80，不做 TLS）。
 
----
-
-## 分支策略
-
-| 分支 | 用途 | 说明 |
-|---|---|---|
-| `main` | **已锁定**（需 PR 才能合并） | SQL Server 原始基线，作为稳定参考 |
-| `sqlite` | **本部署用** | SQLite 内置数据库 + Docker 编排，前端端口 80 |
-| `sqlserver-docker` | 需要 SQL Server 时用 | compose 自带 `db` 容器，适合本地 / 有内存的机器 |
-
-> 开发请在子分支进行（`git checkout -b feat-xxx sqlite`），改完开 PR 合回 `main`。
-> `main` 已配置分支保护规则（Ruleset `protect-main`）：直接 `git push origin main` 会被拒绝。
+每一步都给出：**为什么这么做 → 命令逐条解释 → 怎么验证成功**。
 
 ---
 
-## 架构
+## 0. 部署总览
 
 ```
-[ 浏览器 ] ──HTTP 80──▶ [ 前端容器 nginx:80 ] ──/api/──▶ [ 后端 Kestrel:5099 ]
-                                                     │
-                                           [ Redis:6379 ]  （验证码缓存）
-                                           [ SQLite 文件 /app/data/asset.db ]
+[ 浏览器 ] ──HTTP 80──▶ [ 前端容器 nginx:80 ] ──/api/──▶ [ 后端容器 Kestrel:5099 ]
+                                                      │
+                                            [ redis:6379 ]   验证码缓存
+                                            [ SQLite 文件 /app/data/asset.db ]
 ```
+
+| 容器 | 服务 | 作用 | 端口 |
+|---|---|---|---|
+| `frontend` | nginx | 托管前端静态资源，反向代理 `/api`、`/uploads`、`/avatars` | 宿主机 `80` |
+| `backend` | .NET 10 (Kestrel) | 业务 API | 仅容器内 `5099` |
+| `redis` | redis:7-alpine | 图形/短信验证码缓存 | 仅容器内 `6379` |
+
+**为什么用 SQLite 而不是 SQL Server**：SQL Server 容器启动时会硬性检查物理内存 ≥ 2GB，2GB 的机器装不下（会启动失败或反复 OOM）。SQLite 是单文件数据库，零额外进程，最省内存，业务代码无需改动。
 
 ---
 
-## 一、服务器准备
+## 1. 分支选择（先搞清楚自己部署的是哪一版）
 
-### 1. 登录
+| 分支 | 数据库 | Docker 编排 | 适用场景 |
+|---|---|---|---|
+| `main` | SQL Server（原始版） | 无 | **已锁定**，只能通过 PR 修改 |
+| `sqlite` | **SQLite**（本文档） | 有，无 `db` 服务 | 2GB 小机 ✅ |
+| `sqlserver-docker` | SQL Server | 有，含 `db` 容器 | 本地 / 内存 ≥4GB 的机器 |
+
+```bash
+# 确认当前分支（应为 sqlite）
+git branch
+# 切换分支
+git checkout sqlite
+```
+
+> `main` 已配置分支保护（Ruleset `protect-main`），直接 `git push origin main` 会被 GitHub 拒绝。日常改动都在子分支做。
+
+---
+
+## 2. 准备阶段
+
+### 2.1 登录服务器
+
 ```bash
 ssh root@<你的公网IP>
 ```
 
-### 2. 加 2GB swap（2GB 机器必做，防 OOM）
-```bash
-sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile
-sudo mkswap /swapfile && sudo swapon /swapfile
-echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
-```
-✅ 验证：`swapon --show` 看到 `/swapfile`；`free -h` 的 Swap 约 2G。
+- `ssh`：远程登录命令。
+- `root@<IP>`：以 root 身份登录（后面大量命令需要写系统目录）。
+- 出现密码提示时输入服务器密码；看到 `root@xxx:~$` 提示符即登录成功。
 
-### 3. 安装 Docker + 腾讯云内网加速（3Mbps 公网拉镜像很慢，走内网加速器）
+### 2.2 加 2GB swap（2GB 机器必做，防 OOM）
+
+物理内存只有 2GB，构建 .NET 镜像时很容易被 OOM Killer 杀掉。加 swap 用磁盘换内存。
+
 ```bash
-sudo apt-get update
-sudo apt-get install -y docker.io docker-compose-v2
-sudo systemctl enable --now docker
-sudo mkdir -p /etc/docker
-sudo tee /etc/docker/daemon.json >/dev/null <<'EOF'
+sudo fallocate -l 2G /swapfile   # 预分配 2GB 磁盘文件作为 swap 区
+sudo chmod 600 /swapfile         # 权限设为仅 root 可读写（swap 内容可能含敏感数据）
+sudo mkswap /swapfile            # 标记为 swap 空间（在磁盘文件上写入 swap 头信息）
+sudo swapon /swapfile            # 立即启用
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab   # 开机自动挂载
+```
+
+逐条解释：
+- `fallocate -l 2G`：立刻分配 2GB 文件（比 `dd` 快很多）。
+- `chmod 600`：防止其他用户读取 swap 内容。
+- `mkswap`：把普通文件格式化为 swap 区。
+- `swapon`：挂载启用。
+- `/etc/fstab` 那行：`/swapfile` 是设备，`none` 表示不做文件系统检查，`swap` 是类型，后两个 `0` 是 dump/检查优先级。
+
+✅ **验证**：
+```bash
+swapon --show    # 出现 /swapfile 即成功
+free -h          # Swap 行显示已用/总量
+```
+
+### 2.3 安装 Docker + 腾讯云内网镜像加速
+
+公网带宽只有 3Mbps，直接从 Docker Hub 拉镜像很慢。腾讯云 CVM 可以用**内网镜像加速器**（不走公网流量，很快）。
+
+```bash
+sudo apt-get update                                  # 更新软件源索引
+sudo apt-get install -y docker.io docker-compose-v2   # 安装 Docker 引擎 + Compose v2 插件
+sudo systemctl enable --now docker                   # 设为开机自启并立即启动
+sudo mkdir -p /etc/docker                            # 确保配置目录存在
+sudo tee /etc/docker/daemon.json >/dev/null <<'EOF'  # 写入镜像加速配置
 { "registry-mirrors": ["https://mirror.ccs.tencentyun.com"] }
 EOF
-sudo systemctl restart docker
+sudo systemctl restart docker                        # 重启使配置生效
 ```
-✅ 验证：`docker --version`、`docker compose version`（显示 v2.x）；`docker info | grep -A1 Mirrors` 显示 `tencentyun`。
-> 若 `docker-compose-v2` 装不上，改用 `sudo apt-get install -y docker-compose-plugin` 或 `curl -fsSL https://get.docker.com | sh`。
 
-### 4. 停掉系统 nginx（它默认占 80，会和容器抢端口）
+逐条解释：
+- `apt-get update`：刷新包索引，否则可能找不到 `docker-compose-v2`。
+- `-y`：自动确认安装，无需交互。
+- `systemctl enable --now`：`enable`=开机自启，`--now`=现在就启动。
+- `daemon.json` 是 Docker 的全局配置，`registry-mirrors` 只对 **Docker Hub** 生效。
+- `tee ... >/dev/null`：把内容写入文件同时不打印到屏幕（`<<'EOF'` 表示直到 `EOF` 结束的单引号块，原样写入不做变量展开）。
+
+✅ **验证**：
 ```bash
-sudo systemctl stop nginx 2>/dev/null; sudo systemctl disable nginx 2>/dev/null
+docker --version            # 例如 Docker version 29.1.3
+docker compose version      # 显示 v2.x（低于 v2 不支持本项目的 compose 文件）
+sudo systemctl is-active docker   # 应输出 active
+cat /etc/docker/daemon.json        # 确认加速器地址
+```
+
+> ⚠️ `mcr.microsoft.com`（微软的 .NET 基础镜像）**不走**该加速器，需要走公网国际链路，会比较慢，见第 5 节。
+
+### 2.4 停掉系统 nginx（80 端口冲突）
+
+Ubuntu 镜像常预装 nginx，它默认监听 80，而我们的前端容器也要用 80 → 端口冲突启动失败。
+
+```bash
+sudo systemctl stop nginx      # 立即停止
+sudo systemctl disable nginx   # 取消开机自启（避免重启后又抢端口）
 sudo ss -lntp | grep ':80' || echo "80 已空闲"
 ```
-✅ 验证：显示“80 已空闲”。
+
+逐条解释：
+- `ss -lntp`：列出正在监听的 TCP 端口及对应进程（`-l` 监听、`-n` 不解析域名、`-t` TCP、`-p` 显示进程）。
+- `grep ':80'`：筛出 80 端口；`|| echo` 表示 grep 没匹配到（有输出）时执行 echo，即端口空闲。
+
+✅ **验证**：最后一行输出 `80 已空闲`。
 
 ---
 
-## 二、部署（sqlite 分支）
+## 3. 获取代码
 
-### 5. 拉代码
+> 国内服务器访问 GitHub 经常很慢甚至卡死。准备三种方式，**优先用方式 B**。
+
+### 方式 A：git clone（最标准，但可能卡）
+
 ```bash
-sudo mkdir -p /opt/asset
+sudo mkdir -p /opt/asset          # 创建部署目录
 sudo git clone -b sqlite https://github.com/Wxy-sunny/AssetManagement.git /opt/asset
 cd /opt/asset
 ```
-✅ 验证：`ls` 看到 `docker-compose.yml`；`git branch` 显示 `* sqlite`。
+- `-b sqlite`：直接检出 `sqlite` 分支（否则默认是 main，服务器跑的是 SQL Server 版）。
+- 最后一个参数是目标目录。
 
-### 6. 生成密钥并写 `.env`
-`.env` 已被 git 忽略，clone 下来没有，必须手动创建：
+⚠️ 若长时间停在 `Cloning into '/opt/asset'...` 且目录大小不变（另开终端 `du -sh /opt/asset` 查看），说明卡住了 → 按 `Ctrl+C` 中止，改用方式 B。
+
+### 方式 B：下载分支压缩包（推荐，单文件下载更稳）
+
 ```bash
-JWT=$(openssl rand -base64 48); ADMIN=$(openssl rand -base64 18)
-sudo tee .env >/dev/null <<EOF
+sudo rm -rf /opt/asset /tmp/asset.tar.gz
+curl -L --connect-timeout 15 --max-time 180 -o /tmp/asset.tar.gz \
+  https://ghfast.top/https://github.com/Wxy-sunny/AssetManagement/archive/refs/heads/sqlite.tar.gz
+ls -lh /tmp/asset.tar.gz
+sudo tar -xzf /tmp/asset.tar.gz -C /opt
+sudo mv /opt/AssetManagement-sqlite /opt/asset
+ls /opt/asset/docker-compose.yml
+```
+- `curl -L`：跟随重定向（代理站点会 302 到真实地址）。
+- `--connect-timeout 15`：连接超时 15 秒；`--max-time 180`：整体最多 180 秒，避免无限挂起。
+- `-o`：指定输出文件。
+- `tar -xzf`：解压 gzip 格式；`-C /opt` 指定解压目录。
+- GitHub 压缩包解压后目录名是 `AssetManagement-sqlite`，所以要 `mv` 成 `/opt/asset`。
+- 代理地址若不通，换 `ghproxy.net` 或 `gh-proxy.com` 替换 `ghfast.top`。
+
+✅ **验证**：`ls /opt/asset/docker-compose.yml` 能列出文件。
+
+### 方式 C：本地打包上传（兜底）
+
+在**本地电脑** PowerShell 执行：
+```powershell
+cd D:\Projects\AssetManagement
+git archive -o D:\asset.zip sqlite
+```
+`git archive` 只打包该分支**已提交**的文件，自动排除 `.git`、`node_modules`、`bin`、`obj`、`.env`，体积很小。
+然后用 OrcaTerm 文件管理器把 `asset.zip` 上传到 `/opt`，在服务器：
+```bash
+cd /opt && sudo unzip -o asset.zip && sudo rm -f asset.zip && sudo mv AssetManagement-sqlite asset && ls /opt/asset/docker-compose.yml
+```
+
+---
+
+## 4. 配置 `.env`（生产密钥，仓库里没有，必须自建）
+
+`.env` 已被 `.gitignore` 忽略，不会随代码下发，必须在服务器上创建。
+
+```bash
+cd /opt/asset
+JWT=$(openssl rand -base64 48)     # 生成 48 字节随机密钥（JWT 签名用）
+ADMIN=$(openssl rand -base64 18)   # 生成 18 字节随机管理员初始密码
+sudo tee .env >/dev/null <<EOF    # 写入 .env 文件
 Jwt__SecretKey=$JWT
 DbType=sqlite
 AssetConnection=DataSource=/app/data/asset.db
@@ -89,79 +199,177 @@ Redis__Connection=redis:6379
 EOF
 cat .env
 ```
-✅ 验证：输出 5 行，且 `AdminSeed__Password` 非空。
 
-### 7. 腾讯云控制台放通 80（控制台操作，非命令）
-实例 → 防火墙 / 安全组 → 添加入站规则：**TCP 80**，来源 `0.0.0.0/0`；`22` 保持开放。
+逐条解释：
+- `openssl rand -base64 48`：生成 48 字节密码学安全随机数并 base64 编码；JWT 密钥要求 ≥32 字节。
+- `$JWT` / `$ADMIN`：shell 变量，取上面命令的输出；`$( )` 是命令替换语法。
+- `<<EOF`（**不加引号**）：heredoc，里面的 `$JWT`、`$ADMIN` 会被 shell 展开成实际值。若写成 `<<'EOF'` 则不会展开，会写入字面量 `$JWT`（坑）。
+- `sudo tee .env`：以 root 权限写文件（`sudo` 后 tee 才有权限），`-a` 是追加，这里不需要；`>/dev/null` 屏蔽输出。
+- `DbType=sqlite` → compose 通过 `SqlSugarConfig__DbType: ${DbType}` 传给后端，决定用哪种数据库。
+- `AssetConnection=DataSource=/app/data/asset.db` → SQLite 单文件路径，落在 `asset-data` 数据卷里，容器重建不丢。
+- `Redis__Connection=redis:6379` → compose 内网服务名 `redis`。
+- `AdminSeed__Password` → 首次启动自动播种 `admin` 账号的密码，**登录后请立刻改掉**。
 
-### 8. 构建并启动
+✅ **验证**：`cat .env` 输出 5 行，`AdminSeed__Password` 非空。密码忘了可随时 `grep AdminSeed /opt/asset/.env` 再查。
+
+---
+
+## 5. 腾讯云控制台放通 80（控制台操作，不能用命令）
+
+1. 打开腾讯云控制台 → 云服务器 CVM → 找到实例 → **安全组**（或"防火墙"）。
+2. 添加入站规则：**协议 TCP**、**端口 80**、**来源 0.0.0.0/0**。
+3. 确认 `22`（SSH）规则仍在，否则会断连。
+
+> 安全组是云厂商侧的包过滤规则，服务器内部 `curl` 到自己的公网 IP 也可能通，但**外部机器**能否访问完全取决于它。
+
+---
+
+## 6. 构建并启动
+
 ```bash
+cd /opt/asset
 sudo docker compose up -d --build
 ```
-✅ 验证：`sudo docker compose ps` 三个服务状态均为 `Up`。
 
-### 9. 看日志确认建表 + 播种
+逐条解释：
+- `docker compose`：读取当前目录的 `docker-compose.yml`。
+- `up`：创建并启动服务。
+- `-d`：后台运行（detached），命令立即返回。
+- `--build`：强制重新构建镜像（首次必须；后端/前端代码有改动时也必须，否则还用旧镜像）。
+
+**首次会很慢（10~25 分钟）**，原因是：
+- `redis` 走腾讯云内网加速器 → 几秒完成；
+- `mcr.microsoft.com/dotnet/sdk:10.0`（.NET SDK 基础镜像，约 200~300MB）**不走**该加速器，只能走国际链路，实测约 140KB/s。
+
+✅ **验证**：
 ```bash
+sudo docker compose ps
+```
+三个服务状态都应为 `Up`，前端应显示 `0.0.0.0:80->80/tcp`。
+
+---
+
+## 7. 验证清单（逐条执行，全部通过才算部署完成）
+
+```bash
+# 1) 容器都起来了吗
+sudo docker compose ps
+
+# 2) 后端日志：自动建表 + 播种管理员
 sudo docker compose logs backend | tail -30
 ```
-✅ 验证：出现 `成功创建 12 个表`、`已初始化管理员账号：admin`。
+✅ 日志应出现 `数据库 AssetConnection 成功创建 12 个表`、`已初始化管理员账号：admin`。
+（出现 `DataProtection keys ... not persisted` 属正常，容器重启后密钥会变，见第 10 节加固建议。）
 
-### 10. 接口验证
 ```bash
-curl -s http://127.0.0.1/api/auth/captcha | head -c 200        # 容器层
-curl -s http://<公网IP>/api/auth/captcha | head -c 200          # nginx + 安全组
+# 3) 容器层接口是否通（走本机 80 → nginx → backend）
+curl -s http://127.0.0.1/api/auth/captcha | head -c 200
 ```
-✅ 验证：两次都返回 JSON（含 `imageBase64`、`captchaId`），不是 400。
+✅ 返回 `{"code":200,"message":"获取成功","data":{"captchaId":...,"imageBase64":"data:image/svg+xml;base64,...`
 
-### 11. 浏览器登录
-打开 `http://<公网IP>`，用 `admin` + 第 6 步的 `ADMIN` 密码登录（`grep AdminSeed .env` 可查）。
-
----
-
-## 三、环境自检（确认前面步骤是否完成）
-
-在服务器执行，对照判断进度：
 ```bash
-echo "=== swap ==="; swapon --show
-echo "=== docker ==="; docker --version; docker compose version; sudo systemctl is-active docker
-echo "=== 镜像加速 ==="; cat /etc/docker/daemon.json
-echo "=== 80 占用 ==="; sudo ss -lntp | grep ':80' || echo "80 空闲"
-echo "=== 代码 ==="; ls /opt/asset/docker-compose.yml 2>/dev/null && echo 已有 || echo 没有
+# 4) 对外是否通（同时验证安全组 + nginx 反代）
+curl -s http://<你的公网IP>/api/auth/captcha | head -c 200
+```
+✅ 同样返回 JSON。
+
+```bash
+# 5) 浏览器打开 http://<你的公网IP>
+```
+✅ 出现登录页，用 `admin` + 第 4 步生成的 `AdminSeed__Password` 登录。
+
+```bash
+# 6) 登录后建议立刻改密码；也可在后台重置
 ```
 
 ---
 
-## 四、故障排查
+## 8. 故障排查（症状 → 原因 → 处理）
 
-1. **某服务非 Up** → `sudo docker compose logs <服务名>` 看报错。
-2. **后端起不来** → 多半 `.env` 缺项；`cat .env` 核对 5 行齐全。
-3. **`:80` 被占用** → `sudo ss -lntp | grep ':80'` 找出进程（常见是系统 nginx），停掉：`sudo systemctl stop nginx`。
-4. **浏览器打不开** → 先在服务器 `curl http://<公网IP>/api/auth/captcha`：通说明容器/反代正常、问题在安全组；不通再查本机 80 监听与容器日志。
-5. **首次建表报错** → 清空数据重来：`sudo docker compose down -v`（会删除 `asset-data` 卷，数据丢失，仅首次调试用）。
-
----
-
-## 五、其他分支（SQL Server）
-
-`sqlserver-docker` 分支自带 `db` 容器，`.env` 改为：
-```
-Jwt__SecretKey=<随机串>
-DbType=sqlserver
-AssetConnection=Server=db,1433;Database=AssetDB;User Id=sa;Password=<强密码>;TrustServerCertificate=True;
-DbSaPassword=<与上面一致的强密码>
-AdminSeed__Password=<强密码>
-Redis__Connection=redis:6379
-```
-启动命令相同（`sudo docker compose up -d --build`，compose 已含 `db` 服务）。
-⚠️ SQL Server 至少需要 2GB 内存，不适合本 2GB 小机；该分支适合本地或内存充足的机器。
+| 症状 | 原因 | 处理 |
+|---|---|---|
+| `bind: address already in use` | 80 端口被系统 nginx 占用 | `sudo systemctl stop nginx`（2.4 节） |
+| `Cloning into ...` 一直不动 | GitHub 直连卡住 | 换第 3 节方式 B |
+| 拉镜像特别慢 | `mcr.microsoft.com` 不走内网加速 | 属正常，等 10~25 分钟；`sudo docker system df` 看进度 |
+| 后端起不来，日志报连接串错误 | `.env` 缺项或写错 | `cat /opt/asset/.env` 核对 5 行 |
+| `400 Invalid Hostname` | 主机白名单没放行你的 IP | 在 `appsettings.Production.json` 的 `AllowedHosts` 加公网 IP 后重新 `up -d --build` |
+| 浏览器跳到 https 打不开 | 旧版强制 HTTPS 重定向 / HSTS | 本项目已关闭 `UseHttpsRedirection`、nginx 用 `$scheme`；若浏览器缓存了 HSTS，用无痕窗口 |
+| 登录后立刻跳回登录页 | **用户没分配角色** | 后台「权限管理 → 用户管理」给该用户选角色，然后**重新登录**（JWT 里的角色是登录时写入的） |
+| 登录后提示"没有该功能的操作权限" | 角色权限没配 | 后台「权限管理 → 角色管理 → 分配权限」勾选对应功能 |
+| 短信验证码收不到 | **项目未接入短信网关**，验证码只打印在后端日志 | 见第 11 节 |
+| 磁盘满 | 构建缓存 + 镜像占空间 | `docker system prune -a`（会删未使用的镜像） |
 
 ---
 
-## 六、安全与上线核对
+## 9. 日常运维
 
-- [ ] `Jwt__SecretKey` ≥ 32 字节且稳定（重启不变）
-- [ ] 登录后立即在后台修改管理员初始密码
-- [ ] 定期备份数据：直接拷贝 `asset-data` 卷里的 `asset.db` 文件
-- [ ] 公网仅暴露 80；如需 HTTPS，在宿主机外层做 TLS 终止，再把 `Program.cs` 中注释掉的 `UseHttpsRedirection` 启用
-- [ ] 表结构稳定后，将 compose 环境变量 `DatabaseInitialization__Enabled` 改为 `"false"`
-- [ ] 应用层已内置：BCrypt 密码哈希、JWT 完整校验、登录防爆破、速率限制、安全响应头（HSTS 仅在 HTTPS 下下发）、Swagger 仅开发环境开放
+```bash
+cd /opt/asset
+
+# 查看服务状态
+sudo docker compose ps
+
+# 实时看后端日志（排错最常用）
+sudo docker compose logs -f backend
+
+# 重启后端（改了后端代码并重新 build 后）
+sudo docker compose up -d --build backend
+
+# 全部停止（保留数据卷）
+sudo docker compose down
+
+# 停止并删除数据卷（会清空数据库！）
+sudo docker compose down -v
+
+# 备份 SQLite 数据（拷走这一个文件即可）
+sudo docker compose exec backend cat /app/data/asset.db > ./asset-$(date +%F).db
+
+# 查看磁盘占用
+sudo docker system df
+```
+
+**更新代码**（本地改完推送后）：
+```bash
+cd /opt/asset
+sudo git fetch origin && sudo git checkout sqlite && sudo git pull origin sqlite
+sudo docker compose up -d --build
+```
+> 若当初是方式 B（压缩包）部署的，目录里没有 `.git`，需要重新下载压缩包覆盖，或改用方式 A/C。
+
+---
+
+## 10. 生产加固建议（按需）
+
+1. **HTTPS**：在宿主机外层用 Caddy/nginx 做 TLS 终止（443 → 80），再把 `Program.cs` 中注释掉的 `UseHttpsRedirection` 启用。注意：外层代理必须透传 `X-Forwarded-Proto`。
+2. **DataProtection 密钥持久化**：在 compose 的 backend 服务加 `dpkeys:/root/.aspnet/DataProtection-Keys` 卷并在 `volumes:` 声明，重启后登录态不再失效。
+3. **关闭自动建表**：表结构稳定后，把 compose 里 `DatabaseInitialization__Enabled` 改为 `"false"`。
+4. **数据库初始化开关**：`DatabaseInitialization__CreateTablesOnStartup` 是幂等补表，可保留。
+5. **定期备份**：SQLite 是单文件，定时 `docker compose exec backend cat /app/data/asset.db > backup.db` 即可。
+6. **换强密码**：管理员初始密码在 `.env` 里且出现过在终端记录中，登录后务必修改。
+
+---
+
+## 11. 已知限制：短信验证码
+
+当前代码**没有接入任何短信服务商**（项目内无阿里云/腾讯云短信 SDK）：
+
+- `SmsCodeService` 生成验证码后只 `Console.WriteLine` 打印到**后端日志**；
+- 接口仍返回"验证码已发送"，因此前端看起来成功、手机却收不到；
+- 联调开关 `Sms:ReturnCodeInResponse` 在所有环境默认 `false`，即前端也拿不到验证码。
+
+临时联调办法：在服务器执行
+```bash
+sudo docker compose logs backend | grep "\[SMS\]"
+```
+即可看到该手机号的验证码。
+
+要真正发送短信，需引入 SDK（如阿里云 `Aliyun.SDK.Dysmsapi`）并配置 `AccessKeyId/Secret`、`SignName`、`TemplateCode`，同时把开关 `Sms:Enabled` 打开并**严格校验 SDK 返回码**（当前是无条件返回成功）。属于独立需求，未包含在本次部署内。
+
+---
+
+## 12. 附：本次部署实际踩到的坑（供参考）
+
+1. **GitHub clone 卡死** → 改用分支压缩包 + 代理下载（方式 B）。
+2. **80 端口被系统 nginx 占用** → 停用系统 nginx。
+3. **.NET 基础镜像拉取极慢** → 属国际链路，非配置错误，等待即可。
+4. **新用户登录后立刻"过期"** → 根因是该用户未分配角色，后端把"无角色"当成 401（未登录），前端据此清空登录态；现已改为返回 403，并在前端加了路由级权限拦截与 403 页面。
