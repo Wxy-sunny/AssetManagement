@@ -4,6 +4,7 @@ using AssetManagementSystem.Models;
 using AssetManagementSystem.Services;
 using AssetManagementSystem.Utils;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
 using SqlSugar;
 using System;
@@ -23,11 +24,13 @@ namespace AssetManagementSystem.Controllers
 		private readonly DbServer _dbServer;
 		private readonly ISqlSugarClient _db;
 		private readonly AssetManagementSystem.Services.ICacheService _cache;
+		private readonly IWebHostEnvironment _env;
 
-		public UserController(DbServer dbServer, AssetManagementSystem.Services.ICacheService cache)
+		public UserController(DbServer dbServer, AssetManagementSystem.Services.ICacheService cache, IWebHostEnvironment env)
 		{
 			_dbServer = dbServer;
 			_cache = cache;
+			_env = env;
 			_db = dbServer.Use(DbNames.Asset);
 		}
 
@@ -135,6 +138,8 @@ namespace AssetManagementSystem.Controllers
 				PassWord = PasswordHelper.Hash(dto.password), // BCrypt 哈希存储
 				Email = dto.email,
 				Mobile = dto.mobile,
+				// 随机分配一个系统内置头像（用户可在个人中心自行更换）
+				Avatar = BuiltinAvatars.PickRandom(_env),
 				RoleId = dto.roleId,
 				RoleName = await ResolveRoleName(dto.roleId, dto.roleName),
 				DeptId = dto.deptId,

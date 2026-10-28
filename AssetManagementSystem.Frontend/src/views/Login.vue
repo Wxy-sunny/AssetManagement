@@ -11,7 +11,7 @@
         <div class="brand-logo-wrap">
           <span class="brand-ring r1"></span>
           <span class="brand-ring r2"></span>
-          <img class="brand-logo" :src="logoUrl" alt="" />
+          <img class="brand-logo" :src="logoUrl" alt="" title="点击查看系统介绍" @click="goIntro" />
         </div>
         <h1 class="brand-name">资产管理系统</h1>
         <p class="brand-slogan">资产全生命周期 · 数字化管理平台</p>
@@ -69,7 +69,7 @@
     </div>
 
     <el-card class="login-card">
-      <img class="login-logo" :src="logoUrl" alt="资产管理系统" />
+      <img class="login-logo" :src="logoUrl" alt="资产管理系统" title="点击查看系统介绍" @click="goIntro" />
       <h2 class="login-title">资产管理系统</h2>
 
       <el-tabs v-model="activeTab" class="login-tabs">
@@ -136,6 +136,9 @@
               <el-link type="primary" :underline="false" @click="openContact">
                 联系管理员
               </el-link>
+              <el-link type="primary" :underline="false" @click="goIntro">
+                系统介绍
+              </el-link>
             </div>
           </el-form>
         </el-tab-pane>
@@ -187,6 +190,11 @@
                 >登 录</el-button
               >
             </el-form-item>
+            <div class="extra-row intro-row">
+              <el-link type="primary" :underline="false" @click="goIntro">
+                系统介绍
+              </el-link>
+            </div>
           </el-form>
         </el-tab-pane>
 
@@ -431,6 +439,9 @@ import logoUrl from '@/assets/logo.png'
 const router = useRouter()
 const userStore = useUserStore()
 const themeStore = useThemeStore()
+
+// ============ 点击 Logo 查看系统介绍 ============
+const goIntro = () => router.push('/intro')
 
 // ============ 主题切换（与 Layout 同一套 store，选择即时生效并持久化） ============
 const onThemeCommand = (name: ThemeName) => {
@@ -992,6 +1003,13 @@ const handleContactSubmit = async () => {
   animation: logo-float 4s ease-in-out infinite;
   position: relative;
   z-index: 1;
+  /* 父级 .brand-side 为 pointer-events: none，这里单独开启才能点击 */
+  pointer-events: auto;
+  cursor: pointer;
+  transition: transform 0.2s;
+}
+.brand-logo:hover {
+  transform: scale(1.06);
 }
 .brand-right .brand-logo-wrap {
   margin-left: auto;
@@ -1079,6 +1097,11 @@ const handleContactSubmit = async () => {
   height: 64px;
   margin: 0 auto 12px;
   border-radius: 12px;
+  cursor: pointer;
+  transition: transform 0.2s;
+}
+.login-logo:hover {
+  transform: scale(1.06);
 }
 .login-card {
   width: 420px;
@@ -1117,5 +1140,9 @@ const handleContactSubmit = async () => {
   justify-content: flex-end;
   gap: 16px;
   margin-bottom: 4px;
+}
+/* 手机号登录页只有「系统介绍」一个链接，居中显示更协调 */
+.intro-row {
+  justify-content: center;
 }
 </style>

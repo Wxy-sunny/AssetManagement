@@ -1,5 +1,7 @@
+using AssetManagementSystem.Services.Sms;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using StackExchange.Redis;
 using System.Security.Cryptography;
 
@@ -27,15 +29,21 @@ namespace AssetManagementSystem.Services
 		private readonly IConnectionMultiplexer _redis;
 		private readonly IMemoryCache _memory;
 		private readonly IConfiguration _configuration;
+		private readonly ISmsSender _smsSender;
+		private readonly ILogger<SmsCodeService> _logger;
 
 		public SmsCodeService(
 			IConnectionMultiplexer redis,
 			IMemoryCache memory,
-			IConfiguration configuration)
+			IConfiguration configuration,
+			ISmsSender smsSender,
+			ILogger<SmsCodeService> logger)
 		{
 			_redis = redis;
 			_memory = memory;
 			_configuration = configuration;
+			_smsSender = smsSender;
+			_logger = logger;
 		}
 
 		private static string CodeKey(string mobile) => $"ams:sms:code:{mobile}";
@@ -90,13 +98,24 @@ namespace AssetManagementSystem.Services
 		}
 
 		/// <summary>
-		/// 生成并缓存验证码
+		/// 生成验证码并通过短信通道真实下发。
+		/// 只有发送成功才写入缓存：发送失败时不留下有效验证码，避免"提示已发送但用户永远收不到"。
 		/// </summary>
-		public string Generate(string mobile)
+		public async Task<SmsSendResult> GenerateAndSendAsync(string mobile)
 		{
 			// 6 位数字验证码
 			var code = RandomNumberGenerator.GetInt32(0, 1_000_000).ToString("D6");
 
+			// 1. 先真实发送
+			var result = await _smsSender.SendVerifyCodeAsync(mobile, code);
+			if (!result.Success)
+			{
+				_logger.LogWarning("验证码短信发送失败，手机号：{Mobile}，原因：{Message}，错误码：{ErrorCode}",
+					mobile, result.Message, result.ErrorCode);
+				return result;
+			}
+
+			// 2. 发送成功后再缓存验证码 + 记录重发间隔
 			var db = Db;
 			if (db != null)
 			{
@@ -111,10 +130,8 @@ namespace AssetManagementSystem.Services
 				_memory.Set(ThrottleKey(mobile), DateTime.Now, TimeSpan.FromSeconds(ResendIntervalSeconds));
 			}
 
-			// TODO: 接入真实短信网关（阿里云 / 腾讯云等）
-			Console.WriteLine($"[SMS] 手机号 {mobile} 的验证码为 {code}，{ExpireMinutes} 分钟内有效");
-
-			return code;
+			_logger.LogInformation("验证码短信已发送，手机号：{Mobile}，通道：{Provider}", mobile, result.Provider);
+			return SmsSendResult.Ok(result.Provider, code, "验证码已发送");
 		}
 
 		/// <summary>
@@ -152,23 +169,27 @@ namespace AssetManagementSystem.Services
 			_configuration.GetValue<bool>("Sms:EnableTextNotify", true);
 
 		/// <summary>
-		/// 发送一条文本短信（通用，非验证码）
-		/// 说明：当前未接入真实短信网关，仅打印到控制台（与验证码一致）；
-		/// 接入网关后，在此方法中调用对应 SDK 发送即可。
+		/// 发送一条文本短信（通用，非验证码）；返回是否发送成功。
+		/// 短信失败不会中断主业务流程，只记录日志并返回 false。
 		/// </summary>
 		/// <param name="mobile">手机号</param>
 		/// <param name="text">短信内容（含签名，建议不超过 70 字）</param>
-		public Task SendTextAsync(string? mobile, string text)
+		public async Task<bool> SendTextAsync(string? mobile, string text)
 		{
 			if (string.IsNullOrWhiteSpace(mobile) || string.IsNullOrWhiteSpace(text))
-				return Task.CompletedTask;
+				return false;
 
 			if (!TextNotifyEnabled)
-				return Task.CompletedTask;
+				return false;
 
-			// TODO: 接入真实短信网关（阿里云 / 腾讯云等）后替换为实际发送调用
-			Console.WriteLine($"[SMS] 发送文本短信至 {mobile}：{text}");
-			return Task.CompletedTask;
+			var result = await _smsSender.SendTextAsync(mobile, text);
+			if (!result.Success)
+			{
+				_logger.LogWarning("文本短信发送失败，手机号：{Mobile}，原因：{Message}", mobile, result.Message);
+				return false;
+			}
+
+			return true;
 		}
 	}
 }

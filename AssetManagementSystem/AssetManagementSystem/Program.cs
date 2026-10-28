@@ -83,6 +83,13 @@ builder.Services.AddSingleton<AssetManagementSystem.Services.ICaptchaService, Ca
 // 登录防爆破守卫（账号失败锁定 + 可选 IP 限流）
 builder.Services.AddSingleton<AssetManagementSystem.Services.LoginGuardService>();
 
+// 短信发送通道（按 Sms:Provider 配置选择：none / log / aliyun / webhook）
+// 未启用或配置无效时使用 DisabledSmsSender，接口会明确返回"短信服务未启用"，不再假成功
+builder.Services.AddSingleton<AssetManagementSystem.Services.Sms.ISmsSender>(sp =>
+	AssetManagementSystem.Services.Sms.SmsSenderFactory.Create(
+		builder.Configuration,
+		sp.GetRequiredService<ILoggerFactory>()));
+
 // 手机验证码服务（优先 Redis，Redis 不可用时自动降级为内存）
 builder.Services.AddScoped<SmsCodeService>();
 

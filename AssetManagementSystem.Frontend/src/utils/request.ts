@@ -203,6 +203,14 @@ request.interceptors.response.use(
       return Promise.reject(error);
     }
 
+    // HTTP 403：已登录但没有该功能的权限——只提示，不清除登录态（与 401 区分）
+    if (error.response?.status === 403) {
+      const data: any = error.response?.data;
+      const msg = data?.message ?? data?.Message ?? '没有该功能的操作权限';
+      ElMessage.error(msg);
+      return Promise.reject(error);
+    }
+
     if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
       ElMessage.error('请求超时，请稍后重试');
     } else if (!window.navigator.onLine) {

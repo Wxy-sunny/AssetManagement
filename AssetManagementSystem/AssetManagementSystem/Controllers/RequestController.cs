@@ -213,8 +213,7 @@ namespace AssetManagementSystem.Controllers
 			if (notifySms && !string.IsNullOrWhiteSpace(entity.Mobile))
 			{
 				var smsText = $"【资产管理系统】您的{typeName}申请已处理。{remarkPart}请登录系统查看详情。";
-				await _sms.SendTextAsync(entity.Mobile, smsText);
-				smsSent = true;
+				smsSent = await _sms.SendTextAsync(entity.Mobile, smsText);
 			}
 
 			return (messageSent, smsSent);

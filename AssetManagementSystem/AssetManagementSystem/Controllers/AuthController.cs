@@ -169,6 +169,8 @@ namespace AssetManagementSystem.Controllers
 					PassWord = PasswordHelper.Hash(dto.password), // BCrypt 哈希存储
 					Email = dto.email,
 					Mobile = mobile,
+					// 随机分配一个系统内置头像（用户可在个人中心自行更换）
+					Avatar = BuiltinAvatars.PickRandom(_env),
 					IsEnabled = true,
 					StatusCode = 1,
 					StatusDesc = "启用",
@@ -188,10 +190,11 @@ namespace AssetManagementSystem.Controllers
 
 		/// <summary>
 		/// 发送手机验证码（登录/绑定共用）
+		/// 只有短信通道真实发送成功才会返回"已发送"；发送失败会返回具体错误原因。
 		/// </summary>
 		[HttpPost("sms/code")]
 		[EnableRateLimiting("sms")]
-		public ApiResult<object> SendSmsCode([FromBody] SmsCodeDto dto)
+		public async Task<ApiResult<object>> SendSmsCode([FromBody] SmsCodeDto dto)
 		{
 			var mobile = dto?.mobile?.Trim();
 			if (string.IsNullOrWhiteSpace(mobile) || !IsMobile(mobile))
@@ -200,10 +203,15 @@ namespace AssetManagementSystem.Controllers
 			if (!_smsCodeService.CanSend(mobile, out var waitSeconds))
 				return ApiResult<object>.Fail("400", $"发送过于频繁，请 {waitSeconds} 秒后再试");
 
-			var code = _smsCodeService.Generate(mobile);
+			// 生成验证码并真实下发；发送失败时不会缓存验证码
+			var result = await _smsCodeService.GenerateAndSendAsync(mobile);
+			if (!result.Success)
+				return ApiResult<object>.Fail("500", result.Message);
 
-			// 本地联调：未接入短信网关时把验证码回传给前端，便于测试
-			var data = _smsCodeService.ReturnCodeInResponse ? new { code } : null;
+			// 联调模式（仅 log 通道或显式开启时）：把验证码回传给前端，便于测试
+			var data = _smsCodeService.ReturnCodeInResponse && !string.IsNullOrEmpty(result.Code)
+				? new { code = result.Code }
+				: null;
 			return ApiResult<object>.Success(data, "验证码已发送");
 		}
 
@@ -455,17 +463,10 @@ namespace AssetManagementSystem.Controllers
 				[HttpGet("avatars")]
 				public ApiResult<object> GetDefaultAvatars()
 				{
-				var root = _env.WebRootPath ?? Path.Combine(_env.ContentRootPath, "wwwroot");
-				var dir = Path.Combine(root, "avatars");
-				if (!Directory.Exists(dir))
-					return ApiResult<object>.Success(new List<string>(), "暂无内置头像");
-
-				var urls = Directory.EnumerateFiles(dir)
-					.Where(f => IsImageExt(Path.GetExtension(f)))
-					.OrderBy(f => f)
-					.Select(f => "/avatars/" + Path.GetFileName(f))
-					.ToList();
-				return ApiResult<object>.Success(urls, "获取成功");
+					var urls = BuiltinAvatars.GetUrls(_env);
+					return urls.Count == 0
+						? ApiResult<object>.Success(new List<string>(), "暂无内置头像")
+						: ApiResult<object>.Success(urls, "获取成功");
 				}
 
 				/// <summary>

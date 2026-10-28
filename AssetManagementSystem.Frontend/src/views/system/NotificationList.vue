@@ -37,7 +37,7 @@
 
     <el-card shadow="never">
       <div class="toolbar">
-        <el-button type="primary" :icon="Plus" @click="openDialog()">新增通知</el-button>
+        <el-button v-if="canManage" type="primary" :icon="Plus" @click="openDialog()">新增通知</el-button>
       </div>
 
       <el-table v-loading="loading" :data="tableData" border stripe>
@@ -63,7 +63,7 @@
         <el-table-column label="创建时间" width="170">
           <template #default="{ row }">{{ row.createTime || '-' }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="210" fixed="right">
+        <el-table-column v-if="canManage" label="操作" width="210" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" size="small" @click="openDialog(row)">编辑</el-button>
             <el-button
@@ -139,9 +139,10 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { Search, Refresh, Plus } from '@element-plus/icons-vue'
+import { useUserStore } from '@/stores/user'
 import {
   getNotificationPage,
   addNotification,
@@ -152,9 +153,14 @@ import {
 import {
   NOTICE_TYPE_MAP,
   NOTICE_TYPE_TAG,
+  PERMISSIONS,
   type NotificationItem,
   type NotificationQuery,
 } from '@/types'
+
+const userStore = useUserStore()
+// 无「通知管理」权限时，直接隐藏新增/编辑/发布/删除等写操作入口
+const canManage = computed(() => userStore.hasPermission(PERMISSIONS.NotificationManage))
 
 const loading = ref(false)
 const submitting = ref(false)

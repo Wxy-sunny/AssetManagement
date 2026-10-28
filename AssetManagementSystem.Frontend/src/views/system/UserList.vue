@@ -59,19 +59,16 @@
         <el-table-column label="最后登录" width="170">
           <template #default="{ row }">{{ row.lastLoginTime || '-' }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="240" fixed="right">
+        <el-table-column v-if="canManage" label="操作" width="240" fixed="right">
           <template #default="{ row }">
-            <template v-if="canManage">
-              <el-button link type="primary" size="small" @click="openDialog(row)">编辑</el-button>
-              <el-button link type="warning" size="small" @click="handleResetPwd(row)">
-                重置密码
-              </el-button>
-              <el-button link type="info" size="small" @click="handleToggle(row)">
-                {{ row.isEnabled ? '禁用' : '启用' }}
-              </el-button>
-              <el-button link type="danger" size="small" @click="handleDelete(row)">删除</el-button>
-            </template>
-            <span v-else class="no-perm">无操作权限</span>
+            <el-button link type="primary" size="small" @click="openDialog(row)">编辑</el-button>
+            <el-button link type="warning" size="small" @click="handleResetPwd(row)">
+              重置密码
+            </el-button>
+            <el-button link type="info" size="small" @click="handleToggle(row)">
+              {{ row.isEnabled ? '禁用' : '启用' }}
+            </el-button>
+            <el-button link type="danger" size="small" @click="handleDelete(row)">删除</el-button>
           </template>
         </el-table-column>
         <template #empty>
