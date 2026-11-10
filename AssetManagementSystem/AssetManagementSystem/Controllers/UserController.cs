@@ -62,6 +62,7 @@ namespace AssetManagementSystem.Controllers
 		private async Task<PageResult<UserDto>> BuildUserPageAsync(string? keyword, string? roleId, string? deptId, int pageIndex, int pageSize)
 		{
 			var total = 0;
+			var totalRef = new RefAsync<int>(0);
 			var list = await _db.Queryable<SysUser>()
 				.WhereIF(!string.IsNullOrWhiteSpace(keyword), u =>
 					u.UserId.Contains(keyword) ||
@@ -71,7 +72,8 @@ namespace AssetManagementSystem.Controllers
 				.WhereIF(!string.IsNullOrWhiteSpace(roleId), u => u.RoleId == roleId)
 				.WhereIF(!string.IsNullOrWhiteSpace(deptId), u => u.DeptId == deptId)
 				.OrderBy(u => u.CreateTime, OrderByType.Desc)
-				.ToPageListAsync(pageIndex, pageSize, total);
+				.ToPageListAsync(pageIndex, pageSize, totalRef);
+			total = totalRef.Value;
 
 			var dtoList = new List<UserDto>();
 			foreach (var u in list)

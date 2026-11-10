@@ -19,6 +19,30 @@
       <template #title>首页</template>
     </el-menu-item>
 
+    <el-menu-item v-if="menuPerm.analytics" index="/dashboard/analytics">
+      <el-icon><Odometer /></el-icon>
+      <template #title>数据仪表盘</template>
+    </el-menu-item>
+
+    <el-sub-menu v-if="menuPerm.flows || menuPerm.inventories || menuPerm.reports" index="business">
+      <template #title>
+        <el-icon><Operation /></el-icon>
+        <span>业务中心</span>
+      </template>
+      <el-menu-item v-if="menuPerm.flows" index="/flows">
+        <el-icon><Tickets /></el-icon>
+        <template #title>流转单据</template>
+      </el-menu-item>
+      <el-menu-item v-if="menuPerm.inventories" index="/inventories">
+        <el-icon><Finished /></el-icon>
+        <template #title>资产盘点</template>
+      </el-menu-item>
+      <el-menu-item v-if="menuPerm.reports" index="/reports">
+        <el-icon><Histogram /></el-icon>
+        <template #title>报表中心</template>
+      </el-menu-item>
+    </el-sub-menu>
+
     <el-sub-menu v-if="menuPerm.assets || menuPerm.categories" index="info">
       <template #title>
         <el-icon><Box /></el-icon>
@@ -110,6 +134,11 @@ import {
   EditPen,
   Message,
   ChatLineSquare,
+  Odometer,
+  Operation,
+  Tickets,
+  Finished,
+  Histogram,
 } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
 import { PERMISSIONS } from '@/types'
@@ -125,6 +154,10 @@ const userStore = useUserStore()
 // 菜单可见性：根据当前用户权限动态控制
 const menuPerm = computed(() => ({
   dashboard: userStore.hasPermission(PERMISSIONS.DashboardView),
+  analytics: userStore.hasPermission(PERMISSIONS.DashboardOverview),
+  flows: userStore.hasPermission(PERMISSIONS.FlowList),
+  inventories: userStore.hasPermission(PERMISSIONS.InventoryList),
+  reports: userStore.hasPermission(PERMISSIONS.ReportView),
   assets: userStore.hasPermission(PERMISSIONS.AssetList),
   categories: userStore.hasPermission(PERMISSIONS.CategoryList),
   files: userStore.hasPermission(PERMISSIONS.FileList),

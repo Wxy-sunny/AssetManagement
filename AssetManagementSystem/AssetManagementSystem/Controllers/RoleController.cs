@@ -81,11 +81,13 @@ namespace AssetManagementSystem.Controllers
 			(pageIndex, pageSize) = PageGuard.Normalize(pageIndex, pageSize);
 
 			var total = 0;
+			var totalRef = new RefAsync<int>(0);
 			var list = await _db.Queryable<SysRole>()
 				.WhereIF(!string.IsNullOrWhiteSpace(keyword), r =>
 					r.RoleId.Contains(keyword) || r.RoleName.Contains(keyword))
 				.OrderBy(r => r.RoleId)
-				.ToPageListAsync(pageIndex, pageSize, total);
+				.ToPageListAsync(pageIndex, pageSize, totalRef);
+			total = totalRef.Value;
 
 			var dtoList = new List<RoleDto>();
 			foreach (var r in list)

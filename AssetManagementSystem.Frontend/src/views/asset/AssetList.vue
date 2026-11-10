@@ -61,9 +61,12 @@
             批量删除
           </el-button>
         </div>
-        <el-button v-if="canEdit" :icon="RefreshRight" @click="handleRecalculate">
-          重算折旧
-        </el-button>
+        <div class="toolbar-right">
+          <el-button :icon="Tickets" @click="goFlowList">流转单据</el-button>
+          <el-button v-if="canEdit" :icon="RefreshRight" @click="handleRecalculate">
+            重算折旧
+          </el-button>
+        </div>
       </div>
 
       <el-table
@@ -94,7 +97,7 @@
         </el-table-column>
         <el-table-column prop="deptName" label="使用部门" width="120" show-overflow-tooltip />
         <el-table-column prop="useUserName" label="使用人" width="100" show-overflow-tooltip />
-        <el-table-column label="操作" width="150" fixed="right">
+        <el-table-column label="操作" width="230" fixed="right">
           <template #default="{ row }">
             <el-button
               v-if="canEdit"
@@ -114,6 +117,25 @@
             >
               删除
             </el-button>
+            <el-dropdown
+              v-if="canFlow && getRowActions(row).length > 0"
+              @command="(cmd: string) => openFlowDialog(row, cmd)"
+            >
+              <el-button link type="success" size="small">
+                业务办理<el-icon class="el-icon--right"><ArrowDown /></el-icon>
+              </el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item
+                    v-for="action in getRowActions(row)"
+                    :key="action.flowType"
+                    :command="action.flowType"
+                  >
+                    {{ action.label }}
+                  </el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
           </template>
         </el-table-column>
         <template #empty>
@@ -349,14 +371,82 @@
         <el-button type="primary" :loading="submitting" @click="submitForm">确定</el-button>
       </template>
     </el-dialog>
+
+    <!-- 业务办理（领用 / 归还 / 报修 / 报废） -->
+    <el-dialog
+      v-model="flowVisible"
+      :title="`${flowActionLabel} · ${flowAsset?.assetName || ''}`"
+      width="560px"
+      destroy-on-close
+      :close-on-click-modal="false"
+    >
+      <el-alert type="info" :closable="false" class="flow-alert">
+        <template #default>
+          当前状态
+          <b>{{ ASSET_STATUS_MAP[flowAsset?.assetStatus || ''] || '未知' }}</b>
+          → 办理后
+          <b>{{ flowTargetName }}</b>
+          ；本次操作会生成一张流转单据并记入审计流水。
+        </template>
+      </el-alert>
+      <el-form ref="flowFormRef" :model="flowForm" :rules="flowRules" label-width="105px">
+        <el-form-item v-if="flowForm.flowType === 'borrow'" label="使用人" prop="useUserId">
+          <el-select
+            v-model="flowForm.useUserId"
+            filterable
+            clearable
+            placeholder="请选择使用人"
+            style="width: 100%"
+          >
+            <el-option v-for="u in users" :key="u.id" :label="u.userName || u.userId" :value="u.id as string" />
+          </el-select>
+        </el-form-item>
+        <el-form-item v-if="flowForm.flowType === 'borrow'" label="预计归还">
+          <el-date-picker
+            v-model="flowForm.expectReturnDate"
+            type="date"
+            value-format="YYYY-MM-DD"
+            placeholder="选填"
+            style="width: 100%"
+          />
+        </el-form-item>
+        <el-form-item v-if="['repair', 'scrap'].includes(flowForm.flowType)" label="费用 / 残值">
+          <el-input-number v-model="flowForm.fee" :min="0" :precision="2" style="width: 100%" />
+        </el-form-item>
+        <el-form-item label="事由">
+          <el-input
+            v-model="flowForm.remark"
+            type="textarea"
+            :rows="3"
+            placeholder="领用用途 / 故障描述 / 报废原因"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="flowVisible = false">取消</el-button>
+        <el-button type="primary" :loading="flowSubmitting" @click="submitFlow">
+          提交{{ flowActionLabel }}单据
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
-import { Search, Refresh, Plus, Delete, RefreshRight } from '@element-plus/icons-vue'
+import {
+  Search,
+  Refresh,
+  Plus,
+  Delete,
+  RefreshRight,
+  Tickets,
+  ArrowDown,
+} from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
+import { createAssetFlow } from '@/api/assetFlow'
 import {
   getAssetPage,
   addAsset,
@@ -371,6 +461,7 @@ import { getUserPage } from '@/api/user'
 import {
   ASSET_STATUS_MAP,
   ASSET_STATUS_TAG,
+  ALLOWED_FLOW_ACTIONS,
   DEPRECIATION_METHOD_MAP,
   PERMISSIONS,
   type AssetItem,
@@ -379,6 +470,9 @@ import {
   type DepartmentItem,
   type UserItem,
 } from '@/types'
+
+const router = useRouter()
+const goFlowList = () => router.push('/flows')
 
 const loading = ref(false)
 const submitting = ref(false)
@@ -391,6 +485,7 @@ const userStore = useUserStore()
 const canAdd = computed(() => userStore.hasPermission(PERMISSIONS.AssetAdd))
 const canEdit = computed(() => userStore.hasPermission(PERMISSIONS.AssetEdit))
 const canDelete = computed(() => userStore.hasPermission(PERMISSIONS.AssetDelete))
+const canFlow = computed(() => userStore.hasPermission(PERMISSIONS.FlowManage))
 
 // 下拉数据源
 const categories = ref<CategoryItem[]>([])
@@ -619,6 +714,94 @@ const handleRecalculate = async () => {
   }
 }
 
+// ---------- 业务办理：领用 / 归还 / 报修 / 报废 ----------
+const FLOW_TARGET_STATUS: Record<string, string> = {
+  borrow: 'in_use',
+  return: 'idle',
+  repair: 'repair',
+  scrap: 'scrapped',
+}
+const FLOW_ACTION_LABEL: Record<string, string> = {
+  borrow: '领用',
+  return: '归还',
+  repair: '报修',
+  scrap: '报废',
+}
+
+const flowVisible = ref(false)
+const flowSubmitting = ref(false)
+const flowFormRef = ref<FormInstance>()
+const flowAsset = ref<AssetItem | null>(null)
+const flowForm = reactive({
+  flowType: '',
+  useUserId: '',
+  expectReturnDate: null as string | null,
+  fee: null as number | null,
+  remark: '',
+})
+
+const flowRules: FormRules = {
+  useUserId: [
+    {
+      validator: (_rule, _value, callback) => {
+        if (flowForm.flowType === 'borrow' && !flowForm.useUserId) {
+          callback(new Error('领用单必须选择使用人'))
+        } else {
+          callback()
+        }
+      },
+      trigger: 'change',
+    },
+  ],
+}
+
+const flowActionLabel = computed(() => FLOW_ACTION_LABEL[flowForm.flowType] || '业务')
+const flowTargetName = computed(
+  () => ASSET_STATUS_MAP[FLOW_TARGET_STATUS[flowForm.flowType] || ''] || '—',
+)
+
+const getRowActions = (row: AssetItem) => ALLOWED_FLOW_ACTIONS[row.assetStatus || ''] ?? []
+
+const openFlowDialog = (row: AssetItem, flowType: string) => {
+  flowAsset.value = row
+  Object.assign(flowForm, {
+    flowType,
+    useUserId: '',
+    expectReturnDate: null,
+    fee: null,
+    remark: '',
+  })
+  flowVisible.value = true
+}
+
+const submitFlow = async () => {
+  if (!flowFormRef.value || !flowAsset.value) return
+  await flowFormRef.value.validate()
+
+  const selectedUser = users.value.find((u) => u.id === flowForm.useUserId)
+  flowSubmitting.value = true
+  try {
+    await createAssetFlow({
+      assetId: flowAsset.value.id as string,
+      flowType: flowForm.flowType,
+      useUserId: flowForm.useUserId || undefined,
+      useUserName: selectedUser?.userName || selectedUser?.userId,
+      deptId: flowAsset.value.deptId,
+      deptName: flowAsset.value.deptName,
+      fee: flowForm.fee,
+      expectReturnDate: flowForm.expectReturnDate,
+      remark: flowForm.remark,
+    })
+    ElMessage.success(`${flowActionLabel.value}单据已提交，资产状态已更新`)
+    flowVisible.value = false
+    loadData()
+  } catch {
+    // 拦截器已提示错误
+  } finally {
+    flowSubmitting.value = false
+  }
+}
+
 onMounted(() => {
   loadOptions()
   loadData()
@@ -638,7 +821,8 @@ onMounted(() => {
   justify-content: space-between;
   margin-bottom: 16px;
 }
-.toolbar-left {
+.toolbar-left,
+.toolbar-right {
   display: flex;
   gap: 10px;
 }
@@ -653,5 +837,12 @@ onMounted(() => {
 .preview-tip {
   color: #a8abb2;
   margin-left: 4px;
+}
+.flow-alert {
+  margin-bottom: 18px;
+  line-height: 1.6;
+}
+.flow-alert b {
+  color: var(--ams-primary, #409eff);
 }
 </style>

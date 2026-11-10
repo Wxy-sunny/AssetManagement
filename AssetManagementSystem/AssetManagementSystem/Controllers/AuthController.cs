@@ -115,9 +115,10 @@ namespace AssetManagementSystem.Controllers
 				return ApiResult<object>.Success(
 					new { Token = result.Token, RefreshToken = result.RefreshToken, UserInfo = result.UserInfo }, "登录成功");
 			}
-			catch
+			catch (Exception ex)
 			{
-				// 生产环境建议使用 ILogger 记录异常
+				// 记录异常详情，便于排查（对外仍只返回通用提示，避免泄露内部信息）
+				Serilog.Log.Error(ex, "账号密码登录处理异常");
 				return ApiResult<object>.Fail("500", "系统繁忙，请稍后再试");
 			}
 		}

@@ -18,6 +18,14 @@ export interface PermissionGroup {
  */
 export const PERMISSIONS = {
   DashboardView: 'dashboard:view',
+  DashboardOverview: 'dashboard:overview',
+
+  FlowList: 'flow:list',
+  FlowManage: 'flow:manage',
+  InventoryList: 'inventory:list',
+  InventoryManage: 'inventory:manage',
+  ReportView: 'report:view',
+  ReportExport: 'report:export',
 
   AssetList: 'asset:list',
   AssetAdd: 'asset:add',

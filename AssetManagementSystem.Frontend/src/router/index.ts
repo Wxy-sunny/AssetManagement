@@ -69,6 +69,34 @@ const router = createRouter({
           component: () => import('@/views/Dashboard.vue'),
           meta: { title: '首页', permission: PERMISSIONS.DashboardView },
         },
+        // 数据仪表盘（ECharts 多维分析）
+        {
+          path: '/dashboard/analytics',
+          name: 'DashboardAnalytics',
+          component: () => import('@/views/dashboard/DashboardAnalytics.vue'),
+          meta: { title: '数据仪表盘', permission: PERMISSIONS.DashboardOverview },
+        },
+        // 业务流程：领用 / 归还 / 维修 / 报废
+        {
+          path: '/flows',
+          name: 'AssetFlows',
+          component: () => import('@/views/asset/AssetFlowList.vue'),
+          meta: { title: '流转单据', permission: PERMISSIONS.FlowList },
+        },
+        // 资产盘点
+        {
+          path: '/inventories',
+          name: 'Inventories',
+          component: () => import('@/views/inventory/InventoryList.vue'),
+          meta: { title: '资产盘点', permission: PERMISSIONS.InventoryList },
+        },
+        // 报表中心
+        {
+          path: '/reports',
+          name: 'Reports',
+          component: () => import('@/views/report/ReportCenter.vue'),
+          meta: { title: '报表中心', permission: PERMISSIONS.ReportView },
+        },
         // 个人中心（个人资料 / 修改密码）
         {
           path: '/profile',

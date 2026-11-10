@@ -11,6 +11,19 @@ namespace AssetManagementSystem.Utils
 	{
 		// ========== 首页 ==========
 		public const string DashboardView = "dashboard:view";
+		public const string DashboardOverview = "dashboard:overview";
+
+		// ========== 业务流程（领用 / 归还 / 维修 / 报废） ==========
+		public const string FlowList = "flow:list";
+		public const string FlowManage = "flow:manage";
+
+		// ========== 资产盘点 ==========
+		public const string InventoryList = "inventory:list";
+		public const string InventoryManage = "inventory:manage";
+
+		// ========== 报表导出 ==========
+		public const string ReportView = "report:view";
+		public const string ReportExport = "report:export";
 
 		// ========== 信息管理 ==========
 		public const string AssetList = "asset:list";
@@ -46,7 +59,10 @@ namespace AssetManagementSystem.Utils
 		/// </summary>
 		public static readonly string[] All =
 		{
-			DashboardView,
+			DashboardView, DashboardOverview,
+			FlowList, FlowManage,
+			InventoryList, InventoryManage,
+			ReportView, ReportExport,
 			AssetList, AssetAdd, AssetEdit, AssetDelete,
 			CategoryList, CategoryManage,
 			FileList, FileUpload, FileDelete,
@@ -70,7 +86,38 @@ namespace AssetManagementSystem.Utils
 					name = "首页",
 					permissions = new List<PermissionItemDto>
 					{
-						New(DashboardView, "查看首页", "查看首页统计图表")
+						New(DashboardView, "查看首页", "查看首页统计图表"),
+						New(DashboardOverview, "查看数据仪表盘", "查看多维度的经营/资产数据仪表盘")
+					}
+				},
+				new PermissionGroupDto
+				{
+					code = "flow",
+					name = "业务流程",
+					permissions = new List<PermissionItemDto>
+					{
+						New(FlowList, "查看流转单据", "查看领用 / 归还 / 维修 / 报废单据与流转流水"),
+						New(FlowManage, "办理流转单据", "发起领用、归还、报修、报废单据并完成维修闭环")
+					}
+				},
+				new PermissionGroupDto
+				{
+					code = "inventory",
+					name = "资产盘点",
+					permissions = new List<PermissionItemDto>
+					{
+						New(InventoryList, "查看盘点单", "查看盘点单、盘点明细与账实差异"),
+						New(InventoryManage, "管理盘点单", "创建盘点单、录入实盘结果并完成盘点")
+					}
+				},
+				new PermissionGroupDto
+				{
+					code = "report",
+					name = "报表导出",
+					permissions = new List<PermissionItemDto>
+					{
+						New(ReportView, "查看报表", "查看资产台账、分类汇总、状态汇总等报表数据"),
+						New(ReportExport, "导出报表", "将报表数据导出为 Excel / CSV 文件")
 					}
 				},
 				new PermissionGroupDto

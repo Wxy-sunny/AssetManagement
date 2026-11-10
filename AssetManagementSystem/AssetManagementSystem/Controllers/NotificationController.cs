@@ -45,12 +45,14 @@ namespace AssetManagementSystem.Controllers
 			(query.pageIndex, query.pageSize) = PageGuard.Normalize(query.pageIndex, query.pageSize);
 
 			var total = 0;
+			var totalRef = new RefAsync<int>(0);
 			var list = await _db.Queryable<Notification>()
 				.WhereIF(!string.IsNullOrWhiteSpace(query.keyword), n => n.Title.Contains(query.keyword))
 				.WhereIF(!string.IsNullOrWhiteSpace(query.noticeType), n => n.NoticeType == query.noticeType)
 				.WhereIF(query.isPublished.HasValue, n => n.IsPublished == query.isPublished)
 				.OrderBy(n => n.CreateTime, OrderByType.Desc)
-				.ToPageListAsync(query.pageIndex, query.pageSize, total);
+				.ToPageListAsync(query.pageIndex, query.pageSize, totalRef);
+			total = totalRef.Value;
 
 			var result = new PageResult<NotificationDto>(
 				list.Select(MapToDto).ToList(), total, query.pageIndex, query.pageSize);
@@ -70,11 +72,13 @@ namespace AssetManagementSystem.Controllers
 			(pageIndex, pageSize) = PageGuard.Normalize(pageIndex, pageSize);
 
 			var total = 0;
+			var totalRef = new RefAsync<int>(0);
 			var list = await _db.Queryable<Notification>()
 				.Where(n => n.IsPublished == true)
 				.WhereIF(!string.IsNullOrWhiteSpace(keyword), n => n.Title.Contains(keyword))
 				.OrderBy(n => n.PublishTime, OrderByType.Desc)
-				.ToPageListAsync(pageIndex, pageSize, total);
+				.ToPageListAsync(pageIndex, pageSize, totalRef);
+			total = totalRef.Value;
 
 			var result = new PageResult<NotificationDto>(
 				list.Select(MapToDto).ToList(), total, pageIndex, pageSize);

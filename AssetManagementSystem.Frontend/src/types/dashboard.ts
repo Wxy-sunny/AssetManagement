@@ -25,3 +25,31 @@ export interface DashboardData {
   categoryStats: StatItem[]
   trend: TrendItem[]
 }
+
+// 数据仪表盘聚合（与后端 DashboardOverviewDto 保持一致）
+export interface DashboardOverview {
+  assetTotal: number
+  assetQuantity: number
+  originalValue: number
+  accumulatedDepreciation: number
+  netValue: number
+  monthNewCount: number
+  inUseCount: number
+  idleCount: number
+  repairCount: number
+  scrappedCount: number
+  utilizationRate: number
+  idleRate: number
+  repairRate: number
+  scrapRate: number
+  depreciationRate: number
+  statusStats: StatItem[]
+  categoryStats: StatItem[]
+  deptStats: StatItem[]
+  depreciationMethodStats: StatItem[]
+  monthlyTrend: TrendItem[]
+  flowTypeStats: StatItem[]
+  flowPendingCount: number
+  inventoryStats: StatItem[]
+  inventoryAccuracyRate: number
+}

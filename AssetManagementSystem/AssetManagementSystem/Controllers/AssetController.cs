@@ -9,8 +9,10 @@ using Microsoft.AspNetCore.Mvc;
 using SqlSugar;
 using System;
 using System.Collections.Generic;
+using System.IdentityModel.Tokens.Jwt;
 using System.IO;
 using System.Linq;
+using System.Security.Claims;
 using System.Threading.Tasks;
 
 namespace AssetManagementSystem.Controllers
@@ -42,6 +44,9 @@ namespace AssetManagementSystem.Controllers
 			(query.pageIndex, query.pageSize) = PageGuard.Normalize(query.pageIndex, query.pageSize);
 
 			var total = 0;
+			// SqlSugar 的 ToPageListAsync 需要 RefAsync<int> 才能回写总数；
+			// 直接传 int 会隐式转成临时 RefAsync 对象，计数丢失导致 total 恒为 0。
+			var totalRef = new RefAsync<int>(0);
 			var list = await _db.Queryable<Asset>()
 				.WhereIF(!string.IsNullOrWhiteSpace(query.keyword), a =>
 					a.AssetCode.Contains(query.keyword) ||
@@ -53,7 +58,8 @@ namespace AssetManagementSystem.Controllers
 				.WhereIF(query.purchaseDateStart.HasValue, a => a.PurchaseDate >= query.purchaseDateStart)
 				.WhereIF(query.purchaseDateEnd.HasValue, a => a.PurchaseDate <= query.purchaseDateEnd)
 				.OrderBy(a => a.CreateTime, OrderByType.Desc)
-				.ToPageListAsync(query.pageIndex, query.pageSize, total);
+				.ToPageListAsync(query.pageIndex, query.pageSize, totalRef);
+			total = totalRef.Value;
 
 			// 列表返回前实时重算折旧，保证净值始终最新
 			foreach (var item in list)
@@ -337,6 +343,8 @@ namespace AssetManagementSystem.Controllers
 
 		/// <summary>
 		/// 变更资产状态（在用 / 闲置 / 维修中 / 已报废）
+		/// 说明：状态变更必须符合状态机允许的跃迁关系，并同步留下一条流转流水，
+		/// 保证"任何状态变化都有据可查"。
 		/// </summary>
 		[HttpPut("{id}/status")]
 		[Permission(Permissions.AssetEdit)]
@@ -351,17 +359,92 @@ namespace AssetManagementSystem.Controllers
 			if (entity == null)
 				return ApiResult<object>.Fail("404", "资产不存在");
 
-			entity.AssetStatus = dto.status;
-			entity.UpdateTime = DateTime.Now;
+			var fromStatus = entity.AssetStatus ?? AssetStatusCodes.InUse;
+			var toStatus = dto.status;
 
-			var count = await _db.Updateable(entity)
-				.UpdateColumns(a => new { a.AssetStatus, a.UpdateTime })
-				.ExecuteCommandAsync();
+			if (!AssetStatusMachine.IsValidStatus(toStatus))
+				return ApiResult<object>.Fail("400", "未知的资产状态");
 
-			return count > 0
-				? ApiResult<object>.Success(null, "状态更新成功")
-				: ApiResult<object>.Fail("500", "状态更新失败");
+			// 目标状态与当前一致：视为无变化，直接返回成功
+			if (fromStatus == toStatus)
+				return ApiResult<object>.Success(null, "状态未变化");
+
+			if (!AssetStatusMachine.CanTransit(fromStatus, toStatus))
+			{
+				return ApiResult<object>.Fail(
+					"400",
+					$"不允许从「{AssetStatusMachine.GetStatusName(fromStatus)}」变更为「{AssetStatusMachine.GetStatusName(toStatus)}」");
+			}
+
+			var now = DateTime.Now;
+			entity.AssetStatus = toStatus;
+			entity.UpdateTime = now;
+
+			var flow = new AssetFlow
+			{
+				Id = Guid.NewGuid().ToString(),
+				FlowNo = $"LF{now:yyyyMMddHHmmss}{Random.Shared.Next(1000, 9999)}",
+				FlowType = InferFlowType(fromStatus, toStatus),
+				FlowStatus = AssetFlowStatusCodes.Completed,
+				AssetId = entity.Id,
+				AssetCode = entity.AssetCode,
+				AssetName = entity.AssetName,
+				FromStatus = fromStatus,
+				ToStatus = toStatus,
+				DeptId = entity.DeptId,
+				DeptName = entity.DeptName,
+				UseUserId = entity.UseUserId,
+				UseUserName = entity.UseUserName,
+				ApplyUserId = CurrentUserId(),
+				ApplyUserName = CurrentUserName(),
+				HandleUserId = CurrentUserId(),
+				HandleUserName = CurrentUserName(),
+				HandleTime = now,
+				Remark = dto.remark ?? "通过资产列表直接变更状态",
+				IsEnabled = true,
+				StatusCode = 1,
+				StatusDesc = "启用",
+				CreateTime = now,
+				UpdateTime = now
+			};
+
+			try
+			{
+				_db.Ado.BeginTran();
+
+				var count = await _db.Updateable(entity)
+					.UpdateColumns(a => new { a.AssetStatus, a.UpdateTime })
+					.ExecuteCommandAsync();
+				if (count <= 0) throw new InvalidOperationException("状态更新失败");
+
+				await _db.Insertable(flow).ExecuteCommandAsync();
+
+				_db.Ado.CommitTran();
+			}
+			catch (Exception ex)
+			{
+				_db.Ado.RollbackTran();
+				return ApiResult<object>.Fail("500", $"状态更新失败：{ex.Message}");
+			}
+
+			return ApiResult<object>.Success(null, "状态更新成功");
 		}
+
+		/// <summary>
+		/// 根据跃迁前后状态推断流转单据类型
+		/// </summary>
+		private static string InferFlowType(string? from, string? to) => to switch
+		{
+			AssetStatusCodes.InUse => from == AssetStatusCodes.Repair
+				? AssetFlowTypes.RepairDone
+				: AssetFlowTypes.Borrow,
+			AssetStatusCodes.Idle => from == AssetStatusCodes.Repair
+				? AssetFlowTypes.RepairDone
+				: AssetFlowTypes.Return,
+			AssetStatusCodes.Repair => AssetFlowTypes.Repair,
+			AssetStatusCodes.Scrapped => AssetFlowTypes.Scrap,
+			_ => AssetFlowTypes.Return
+		};
 
 		/// <summary>
 		/// 重新计算全部资产的折旧并落库
@@ -439,6 +522,23 @@ namespace AssetManagementSystem.Controllers
 				.Where(f => !string.IsNullOrWhiteSpace(f.PhysicalPath))
 				.Select(f => f.PhysicalPath!)
 				.ToList();
+		}
+
+		/// <summary>
+		/// 当前登录用户主键（JWT sub）
+		/// </summary>
+		private string? CurrentUserId()
+		{
+			return User.FindFirst(ClaimTypes.NameIdentifier)?.Value
+				?? User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
+		}
+
+		/// <summary>
+		/// 当前登录用户姓名（JWT name）
+		/// </summary>
+		private string? CurrentUserName()
+		{
+			return User.FindFirst(ClaimTypes.Name)?.Value;
 		}
 
 		/// <summary>批量清理物理文件（单个失败不影响其他，也不影响主流程）</summary>

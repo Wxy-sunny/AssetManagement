@@ -138,12 +138,14 @@ namespace AssetManagementSystem.Controllers
 			(pageIndex, pageSize) = PageGuard.Normalize(pageIndex, pageSize);
 
 			var total = 0;
+			var totalRef = new RefAsync<int>(0);
 			var list = await _db.Queryable<AssetFile>()
 				.WhereIF(!string.IsNullOrWhiteSpace(keyword), f => f.FileName.Contains(keyword))
 				.WhereIF(!string.IsNullOrWhiteSpace(bizType), f => f.BizType == bizType)
 				.WhereIF(!string.IsNullOrWhiteSpace(assetId), f => f.AssetId == assetId)
 				.OrderBy(f => f.CreateTime, OrderByType.Desc)
-				.ToPageListAsync(pageIndex, pageSize, total);
+				.ToPageListAsync(pageIndex, pageSize, totalRef);
+			total = totalRef.Value;
 
 			var dtoList = list.Select(MapToDto).ToList();
 			var result = new PageResult<FileDto>(dtoList, total, pageIndex, pageSize);

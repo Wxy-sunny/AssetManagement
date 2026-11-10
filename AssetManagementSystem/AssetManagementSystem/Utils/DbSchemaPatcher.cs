@@ -1,3 +1,4 @@
+using AssetManagementSystem.Models;
 using SqlSugar;
 
 namespace AssetManagementSystem.Utils
@@ -14,6 +15,28 @@ namespace AssetManagementSystem.Utils
 			PatchDepartment(db);
 			PatchRole(db);
 			PatchUser(db);
+			PatchBusinessTables(db);
+		}
+
+		/// <summary>
+		/// 补齐业务流程相关的新增表（资产流转 / 资产盘点）。
+		/// 说明：这些表是全新表，用 CodeFirst 建表即可（SqlSugar 只会创建不存在的表），
+		/// 且该写法跨库通用（SQLite 与 SQL Server 均可），不受"自动建表总开关"影响，
+		/// 避免生产环境关闭自动建表后新功能直接报表不存在。
+		/// </summary>
+		private static void PatchBusinessTables(ISqlSugarClient db)
+		{
+			try
+			{
+				db.CodeFirst.InitTables(
+					typeof(AssetFlow),
+					typeof(AssetInventory),
+					typeof(AssetInventoryItem));
+			}
+			catch
+			{
+				// 建表失败不阻断启动（权限不足 / 数据库未就绪时忽略）
+			}
 		}
 
 		/// <summary>

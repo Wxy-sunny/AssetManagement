@@ -11,3 +11,6 @@ export * from './dashboard';
 export * from './permission';
 export * from './notification';
 export * from './message';
+export * from './flow';
+export * from './inventory';
+export * from './report';

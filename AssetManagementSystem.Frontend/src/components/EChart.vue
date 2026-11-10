@@ -31,13 +31,23 @@ const render = () => {
 
 const handleResize = () => chart.value?.resize()
 
+// 侧边栏折叠 / 抽屉展开 / 栅格变化不会触发 window.resize，
+// 用 ResizeObserver 监听容器自身尺寸，避免图表被压扁或留白。
+let observer: ResizeObserver | null = null
+
 onMounted(() => {
   render()
   window.addEventListener('resize', handleResize)
+  if (typeof ResizeObserver !== 'undefined' && chartRef.value) {
+    observer = new ResizeObserver(() => handleResize())
+    observer.observe(chartRef.value)
+  }
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', handleResize)
+  observer?.disconnect()
+  observer = null
   chart.value?.dispose()
   chart.value = null
 })
@@ -46,6 +56,11 @@ watch(
   () => props.option,
   () => render(),
   { deep: true },
+)
+
+watch(
+  () => props.height,
+  () => handleResize(),
 )
 </script>
 
