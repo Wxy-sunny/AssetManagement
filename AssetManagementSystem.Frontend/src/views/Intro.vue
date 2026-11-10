@@ -15,8 +15,8 @@
       <el-tag class="hero-tag" effect="dark" round>资产全生命周期 · 数字化管理平台</el-tag>
       <h1 class="hero-title">资产管理系统</h1>
       <p class="hero-desc">
-        覆盖资产登记、分类归档、折旧统计、资料归档与权限管控的一体化平台。
-        支持多主题界面、角色级权限、文件管理与站内消息，手机端也能用手机号登录。
+        从资产登记、领用 / 归还 / 维修 / 报废全流程闭环，到盘点核账、报表导出与数据仪表盘，
+        每一次状态变更都留有单据可追溯。支持多主题界面、角色级权限与移动端访问。
       </p>
       <div class="hero-badges">
         <span v-for="t in highlights" :key="t.label" class="hero-badge">
@@ -53,7 +53,8 @@
           <figure v-for="shot in group.shots" :key="shot.src" class="shot">
             <el-image
               :src="shot.src"
-              :preview-src-list="[shot.src]"
+              :preview-src-list="group.shots.map((s) => s.src)"
+              :initial-index="group.shots.findIndex((s) => s.src === shot.src)"
               preview-teleported
               fit="contain"
               :alt="shot.title"
@@ -83,7 +84,19 @@
 
 <script setup lang="ts">
 import { useRouter } from 'vue-router'
-import { Box, Files, Lock, Bell, TrendCharts, Picture } from '@element-plus/icons-vue'
+import {
+  Box,
+  Files,
+  Lock,
+  Bell,
+  TrendCharts,
+  Picture,
+  Operation,
+  CircleCheck,
+  Document,
+  Download,
+  PieChart,
+} from '@element-plus/icons-vue'
 import logoUrl from '@/assets/logo.png'
 import loginRight from '@/assets/screenshots/login-purple-right.png'
 import loginCenter from '@/assets/screenshots/login-purple-center.png'
@@ -92,24 +105,33 @@ import homeBlue from '@/assets/screenshots/home-blue.png'
 import homeDark from '@/assets/screenshots/home-dark.png'
 import sidebarCollapsed from '@/assets/screenshots/sidebar-collapsed.png'
 import profileAvatar from '@/assets/screenshots/profile-avatar.png'
+import dashboardTop from '@/assets/screenshots/dashboard-analytics-1.png'
+import dashboardBottom from '@/assets/screenshots/dashboard-analytics-2.png'
+import flowList from '@/assets/screenshots/flow-list.png'
+import inventoryList from '@/assets/screenshots/inventory-list.png'
+import reportCenter from '@/assets/screenshots/report-center.png'
 
 const router = useRouter()
 
 const highlights = [
-  { label: '资产全生命周期', icon: Box },
+  { label: '全生命周期闭环', icon: Box },
+  { label: '盘点核账', icon: CircleCheck },
+  { label: '报表导出', icon: Document },
+  { label: '数据仪表盘', icon: PieChart },
   { label: '角色权限管控', icon: Lock },
-  { label: '文件资料归档', icon: Files },
-  { label: '站内消息通知', icon: Bell },
-  { label: '折旧统计分析', icon: TrendCharts },
+  { label: '多主题 / 移动端', icon: Picture },
 ]
 
 const features = [
   { title: '资产台账', desc: '登记、编辑、批量维护资产档案，按分类与部门归档，支持关键字检索与状态筛选。', icon: Box, color: '#409eff' },
+  { title: '全流程闭环', desc: '领用、归还、报修、维修完成、报废 5 类单据；状态机约束跃迁，资产状态与单据同事务落库，全程留痕可追溯。', icon: Operation, color: '#9254de' },
+  { title: '资产盘点', desc: '按部门或全量生成账面快照，逐条录入实盘结果，自动判定账实差异并汇总准确率，差异可一键生成处理单据。', icon: CircleCheck, color: '#36cfc9' },
+  { title: '报表导出', desc: '资产台账、分类/状态/部门/折旧汇总、流转记录、盘点差异共 7 类报表，支持 Excel 与 CSV 内存生成流式下载。', icon: Download, color: '#14b8a6' },
+  { title: '数据仪表盘', desc: '利用率仪表盘、状态分布、近 12 月趋势、部门排行与运营健康度，统计全部走 SQL 聚合，图表随主题自适应。', icon: PieChart, color: '#409eff' },
   { title: '折旧统计', desc: '按年限与残值自动计算折旧，一键重算并以图表呈现资产净值分布。', icon: TrendCharts, color: '#67c23a' },
-  { title: '分类体系', desc: '多级资产分类树，支持新增下级分类并绑定到资产，便于按类统计。', icon: Files, color: '#e6a23c' },
-  { title: '权限管理', desc: '用户、角色、部门三级管理，21 项功能权限自由勾选，无权限的入口前端直接隐藏。', icon: Lock, color: '#f56c6c' },
-  { title: '资料管理', desc: '上传归档合同、发票、说明书等附件，支持在线预览与批量清理。', icon: Picture, color: '#909399' },
-  { title: '消息通知', desc: '站内通知公告与个人消息，支持发布、撤回与已读状态跟踪。', icon: Bell, color: '#14b8a6' },
+  { title: '分类与资料', desc: '多级资产分类树，合同、发票、说明书等附件在线归档与预览，便于按类统计。', icon: Files, color: '#e6a23c' },
+  { title: '权限管理', desc: '用户、角色、部门三级管理，27 项功能权限自由勾选，无权限的入口前端直接隐藏。', icon: Lock, color: '#f56c6c' },
+  { title: '消息通知', desc: '站内通知公告与个人消息，支持发布、撤回与已读状态跟踪。', icon: Bell, color: '#909399' },
 ]
 
 const gallery = [
@@ -124,11 +146,28 @@ const gallery = [
   },
   {
     title: '主界面',
-    desc: '资产总览仪表盘、资产列表与统计图表，支持浅色与暗黑主题一键切换，侧边菜单可收起。',
+    desc: '资产总览仪表盘、KPI 指标与统计图表，支持浅色与暗黑主题一键切换，侧边菜单可收起。',
     shots: [
-      { src: homeBlue, title: '主界面 · 浅色主题' },
+      { src: homeBlue, title: '首页概览 · 浅色主题' },
       { src: homeDark, title: '主界面 · 暗黑主题' },
       { src: sidebarCollapsed, title: '菜单栏收起状态' },
+    ],
+  },
+  {
+    title: '数据仪表盘',
+    desc: '多维度 KPI 与 ECharts 图表：资产利用率、状态分布、分类与部门排行、近 12 个月新增趋势，以及折旧、流转与盘点的运营健康度。',
+    shots: [
+      { src: dashboardTop, title: '数据仪表盘 · KPI 与资产分布' },
+      { src: dashboardBottom, title: '数据仪表盘 · 趋势与运营健康度' },
+    ],
+  },
+  {
+    title: '业务中心',
+    desc: '领用 / 归还 / 维修 / 报废流转单据、资产盘点与 7 类报表导出，构成从日常办理到核账分析的完整业务链路。',
+    shots: [
+      { src: flowList, title: '流转单据 · 全生命周期记录' },
+      { src: inventoryList, title: '资产盘点 · 盘点单与差异汇总' },
+      { src: reportCenter, title: '报表中心 · 数据预览与导出' },
     ],
   },
   {
@@ -141,7 +180,7 @@ const gallery = [
 ]
 
 const tech = [
-  { name: '前端', desc: 'Vue 3 + TypeScript + Vite + Element Plus' },
+  { name: '前端', desc: 'Vue 3 + TypeScript + Vite 8 + Element Plus + ECharts 6' },
   { name: '后端', desc: '.NET 10 + ASP.NET Core Web API + SqlSugar' },
   { name: '数据库', desc: 'SQLite（内置）/ SQL Server（可选），同一套代码跨库兼容' },
   { name: '缓存', desc: 'Redis 承载验证码与热点缓存，异常时自动降级为内存' },
@@ -318,7 +357,8 @@ const scrollTo = (id: string) => {
 .shot-img {
   display: block;
   width: 100%;
-  aspect-ratio: 16 / 10;
+  /* 截图均为 2.1~2.2 的宽屏比例，容器贴近原图可少留白 */
+  aspect-ratio: 2 / 1;
   cursor: zoom-in;
   /* contain 完整展示界面截图，避免裁掉两侧内容 */
   padding: 10px;
